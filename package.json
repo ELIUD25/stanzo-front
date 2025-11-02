@@ -2,7 +2,8 @@
   "name": "space",
   "version": "0.1.0",
   "private": true,
-  "proxy": "http://localhost:5001",
+  // "proxy": "http://localhost:5001",
+  "proxy": "https://stanzo-back.vercel.app/",
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
     "@emotion/react": "^11.11.1",

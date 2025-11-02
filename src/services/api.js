@@ -2,7 +2,8 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 
 // Configuration
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001/api';
+// const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001/api';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://stanzo-back.vercel.app/';
 const REQUEST_TIMEOUT = 30000;
 
 // Request queue and rate limiting
