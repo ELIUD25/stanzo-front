@@ -1,0 +1,126 @@
+/* src/styles/main.css */
+
+/* Font Import */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Tailwind Directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base Styles */
+@layer base {
+  html {
+    @apply h-full;
+  }
+  
+  body {
+    @apply h-full font-sans bg-gray-50 text-gray-800 antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  #root {
+    @apply h-full;
+  }
+
+  /* Scrollbar Styling */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+}
+
+/* Component Styles */
+@layer components {
+  /* Main Container */
+  .main-container {
+    @apply container mx-auto px-4 py-6;
+  }
+
+  /* Dashboard Cards */
+  .dashboard-card {
+    @apply bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow;
+  }
+
+  /* Form Elements */
+  .form-input {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-gray-700 mb-1;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md transition-colors;
+  }
+
+  /* Navigation */
+  .nav-link {
+    @apply block px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md transition-colors;
+  }
+
+  .nav-link.active {
+    @apply bg-blue-100 text-blue-700;
+  }
+
+  /* POS Specific Styles */
+  .pos-item-button {
+    @apply p-3 border rounded-lg hover:bg-gray-100 transition flex flex-col items-center;
+  }
+
+  .receipt-container {
+    @apply border p-4 rounded-lg bg-white shadow-sm;
+  }
+}
+
+/* Utility Classes */
+@layer utilities {
+  /* For POS grid layout */
+  .pos-grid {
+    @apply grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3;
+  }
+
+  /* For admin tables */
+  .admin-table {
+    @apply min-w-full bg-white rounded-lg overflow-hidden;
+  }
+
+  /* For print styles */
+  @media print {
+    .no-print {
+      @apply hidden;
+    }
+    .print-receipt {
+      @apply block w-full h-auto p-0 m-0;
+    }
+  }
+}
+
+/* Animation Utilities */
+@layer utilities {
+  .fade-in {
+    animation: fadeIn 0.3s ease-in;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
