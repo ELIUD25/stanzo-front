@@ -2,8 +2,8 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 
 // Configuration
-// const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001/api';
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://stanzo-back.vercel.app/';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001/api';
+// const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://stanzo-back.vercel.app/';
 const REQUEST_TIMEOUT = 30000;
 
 // Request queue and rate limiting
@@ -206,11 +206,20 @@ const CalculationUtils = {
         };
       });
 
-      // Calculate financial stats
+      // Calculate financial stats including credit data
       const totalSales = salesWithProfit.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
       const totalProfit = salesWithProfit.reduce((sum, t) => sum + (t.profit || 0), 0);
       const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
       const netProfit = totalProfit - totalExpenses;
+      
+      // Credit statistics
+      const totalCredits = credits.length;
+      const totalCreditAmount = credits.reduce((sum, c) => sum + (c.totalAmount || 0), 0);
+      const totalAmountPaid = credits.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
+      const totalBalanceDue = credits.reduce((sum, c) => sum + (c.balanceDue || 0), 0);
+      const overdueCredits = credits.filter(c => 
+        c.dueDate && new Date(c.dueDate) < new Date() && c.balanceDue > 0
+      ).length;
 
       const financialStats = {
         totalSales: parseFloat(totalSales.toFixed(2)),
@@ -219,7 +228,14 @@ const CalculationUtils = {
         netProfit: parseFloat(netProfit.toFixed(2)),
         profitMargin: totalSales > 0 ? parseFloat(((totalProfit / totalSales) * 100).toFixed(2)) : 0,
         transactionCount: filteredTransactions.length,
-        averageTransaction: filteredTransactions.length > 0 ? parseFloat((totalSales / filteredTransactions.length).toFixed(2)) : 0
+        averageTransaction: filteredTransactions.length > 0 ? parseFloat((totalSales / filteredTransactions.length).toFixed(2)) : 0,
+        // Credit stats
+        totalCredits,
+        totalCreditAmount: parseFloat(totalCreditAmount.toFixed(2)),
+        totalAmountPaid: parseFloat(totalAmountPaid.toFixed(2)),
+        totalBalanceDue: parseFloat(totalBalanceDue.toFixed(2)),
+        overdueCredits,
+        creditCollectionRate: totalCreditAmount > 0 ? parseFloat(((totalAmountPaid / totalCreditAmount) * 100).toFixed(2)) : 0
       };
 
       return {
@@ -244,7 +260,13 @@ const CalculationUtils = {
     netProfit: 0,
     profitMargin: 0,
     transactionCount: 0,
-    averageTransaction: 0
+    averageTransaction: 0,
+    totalCredits: 0,
+    totalCreditAmount: 0,
+    totalAmountPaid: 0,
+    totalBalanceDue: 0,
+    overdueCredits: 0,
+    creditCollectionRate: 0
   }),
 
   validateTransactionData: (transaction) => {
@@ -265,11 +287,33 @@ const CalculationUtils = {
     };
   },
 
+  // Enhanced credit data validation
+  validateCreditData: (credit) => {
+    if (!credit) return null;
+    
+    return {
+      id: credit.id || credit._id,
+      transactionId: credit.transactionId,
+      customerName: credit.customerName || 'Unknown Customer',
+      customerPhone: credit.customerPhone || 'N/A',
+      totalAmount: credit.totalAmount || 0,
+      amountPaid: credit.amountPaid || 0,
+      balanceDue: credit.balanceDue || 0,
+      dueDate: credit.dueDate,
+      status: credit.status || 'pending',
+      shopId: credit.shopId || credit.shop,
+      cashierName: credit.cashierName || 'Unknown Cashier',
+      paymentHistory: credit.paymentHistory || [],
+      createdAt: credit.createdAt,
+      updatedAt: credit.updatedAt
+    };
+  },
+
   groupDataByTime: (data, groupBy = 'daily') => {
     const grouped = {};
     
     data.forEach(item => {
-      const date = dayjs(item.saleDate || item.date);
+      const date = dayjs(item.saleDate || item.date || item.createdAt);
       let key;
       
       switch (groupBy) {
@@ -624,10 +668,12 @@ export const creditAPI = {
 
   delete: async (id) => {
     try {
+      console.log('🗑️ Deleting credit:', id);
       const response = await makeRequest({
         method: 'delete',
         url: `/credits/${id}`
       });
+      console.log('✅ Credit deleted successfully');
       return response.data;
     } catch (error) {
       console.error('❌ Error deleting credit:', error);
@@ -749,7 +795,6 @@ export const creditAPI = {
     };
   }
 };
-
 // ==================== OPTIMIZED TRANSACTION API ====================
 
 export const transactionAPI = {
@@ -832,6 +877,165 @@ export const transactionAPI = {
       }
       
       throw new Error(handleApiError(error));
+    }
+  },
+
+  // Enhanced method to get processed data for TransactionReports component
+  getTransactionReportsData: async (filters = {}) => {
+    try {
+      console.log('📋 Fetching transaction reports data with filters:', filters);
+      
+      const {
+        startDate,
+        endDate,
+        shopId,
+        cashierId,
+        paymentMethod,
+        timeRange,
+        searchText,
+        groupBy = 'daily'
+      } = filters;
+      
+      const params = {};
+      
+      if (startDate && endDate) {
+        params.startDate = dayjs(startDate).format('YYYY-MM-DD');
+        params.endDate = dayjs(endDate).format('YYYY-MM-DD');
+      }
+      
+      if (shopId && shopId !== 'all') {
+        params.shopId = shopId;
+      }
+      
+      if (cashierId && cashierId !== 'all') {
+        params.cashierId = cashierId;
+      }
+      
+      if (paymentMethod && paymentMethod !== 'all') {
+        params.paymentMethod = paymentMethod;
+      }
+      
+      if (groupBy) {
+        params.groupBy = groupBy;
+      }
+      
+      const reportsData = await transactionAPI.getAllReportsData(params);
+      
+      // Enhanced credit data processing
+      const enhancedCredits = (reportsData.credits || []).map(credit => {
+        const shop = (reportsData.shops || []).find(s => s._id === (credit.shopId || credit.shop));
+        const cashier = (reportsData.cashiers || []).find(c => 
+          c._id === credit.cashierId || c.name === credit.cashierName
+        );
+        
+        return {
+          ...credit,
+          shopName: shop?.name || 'Unknown Shop',
+          cashierName: cashier?.name || credit.cashierName || 'Unknown Cashier',
+          shopDetails: shop,
+          cashierDetails: cashier
+        };
+      });
+      
+      const processedData = {
+        ...reportsData,
+        credits: enhancedCredits,
+        enhancedStats: CalculationUtils.processSalesData(
+          reportsData.comprehensiveData?.transactions || [],
+          reportsData.comprehensiveData?.products || [],
+          reportsData.comprehensiveData?.expenses || [],
+          shopId,
+          enhancedCredits
+        ),
+        filteredTransactions: (reportsData.comprehensiveData?.transactions || [])
+          .filter(transaction => {
+            if (!transaction) return false;
+            
+            if (searchText) {
+              const searchLower = searchText.toLowerCase();
+              const searchFields = [
+                transaction.cashierName,
+                transaction.shop,
+                transaction.paymentMethod,
+                transaction.transactionNumber,
+                transaction.customerName,
+                ...(transaction.items?.map(item => item.productName) || [])
+              ].filter(Boolean).map(field => field.toLowerCase());
+              
+              if (!searchFields.some(field => field.includes(searchLower))) {
+                return false;
+              }
+            }
+            
+            return true;
+          })
+          .map(transaction => CalculationUtils.validateTransactionData(transaction)),
+        filters,
+        totalCount: reportsData.comprehensiveData?.transactions?.length || 0,
+        filteredCount: 0,
+        timestamp: new Date().toISOString()
+      };
+      
+      processedData.filteredCount = processedData.filteredTransactions.length;
+      
+      console.log('✅ Transaction reports data processed:', {
+        totalTransactions: processedData.totalCount,
+        filteredTransactions: processedData.filteredCount,
+        shops: processedData.shops.length,
+        cashiers: processedData.cashiers.length,
+        products: processedData.comprehensiveData.products.length,
+        credits: processedData.credits.length
+      });
+      
+      return processedData;
+      
+    } catch (error) {
+      console.error('❌ Error processing transaction reports data:', error);
+      
+      return {
+        comprehensiveReport: {
+          summary: {},
+          timeSeries: [],
+          paymentMethods: [],
+          cashierPerformance: [],
+          productPerformance: [],
+          rawTransactions: []
+        },
+        salesSummary: {
+          summary: {},
+          dailyBreakdown: [],
+          recentTransactions: []
+        },
+        productPerformance: {
+          products: [],
+          summary: {}
+        },
+        cashierPerformance: {
+          cashiers: [],
+          summary: {}
+        },
+        comprehensiveData: {
+          transactions: [],
+          expenses: [],
+          products: [],
+          summary: {},
+          stats: {}
+        },
+        enhancedStats: {
+          salesWithProfit: [],
+          financialStats: CalculationUtils.getDefaultStats()
+        },
+        filteredTransactions: [],
+        shops: [],
+        cashiers: [],
+        credits: [],
+        filters,
+        totalCount: 0,
+        filteredCount: 0,
+        timestamp: new Date().toISOString(),
+        success: false,
+        error: handleApiError(error)
+      };
     }
   },
 
@@ -1957,17 +2161,23 @@ export const reportAPI = {
       
       const transactionReportsData = await transactionAPI.getTransactionReportsData(filters);
       
+      // Enhanced credit statistics
+      const creditStats = {
+        totalCredits: transactionReportsData.credits?.length || 0,
+        totalCreditAmount: transactionReportsData.credits?.reduce((sum, c) => sum + (c.totalAmount || 0), 0) || 0,
+        totalAmountPaid: transactionReportsData.credits?.reduce((sum, c) => sum + (c.amountPaid || 0), 0) || 0,
+        totalBalanceDue: transactionReportsData.credits?.reduce((sum, c) => sum + (c.balanceDue || 0), 0) || 0,
+        overdueCredits: transactionReportsData.credits?.filter(c => 
+          c.dueDate && new Date(c.dueDate) < new Date() && c.balanceDue > 0
+        ).length || 0,
+        collectionRate: transactionReportsData.credits?.length > 0 ? 
+          (transactionReportsData.credits.reduce((sum, c) => sum + (c.amountPaid || 0), 0) / 
+           transactionReportsData.credits.reduce((sum, c) => sum + (c.totalAmount || 0), 0)) * 100 : 0
+      };
+      
       const dashboardData = {
         ...transactionReportsData,
-        creditStats: {
-          totalCredits: transactionReportsData.credits?.length || 0,
-          totalCreditAmount: transactionReportsData.credits?.reduce((sum, c) => sum + (c.totalAmount || 0), 0) || 0,
-          totalAmountPaid: transactionReportsData.credits?.reduce((sum, c) => sum + (c.amountPaid || 0), 0) || 0,
-          totalBalanceDue: transactionReportsData.credits?.reduce((sum, c) => sum + (c.balanceDue || 0), 0) || 0,
-          overdueCredits: transactionReportsData.credits?.filter(c => 
-            c.dueDate && new Date(c.dueDate) < new Date() && c.balanceDue > 0
-          ).length || 0
-        },
+        creditStats,
         loadedAt: new Date().toISOString(),
         dataSources: {
           transactions: transactionReportsData.totalCount,
@@ -2030,7 +2240,8 @@ export const reportAPI = {
           totalCreditAmount: 0,
           totalAmountPaid: 0,
           totalBalanceDue: 0,
-          overdueCredits: 0
+          overdueCredits: 0,
+          collectionRate: 0
         },
         filters,
         totalCount: 0,

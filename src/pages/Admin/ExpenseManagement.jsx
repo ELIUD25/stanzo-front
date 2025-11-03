@@ -1,4 +1,4 @@
-// src/pages/Admin/ExpenseManagement.jsx
+// src/pages/Admin/ExpenseManagement.jsx - FIXED VERSION
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -29,14 +29,16 @@ import {
   ReloadOutlined,
   ExclamationCircleOutlined 
 } from '@ant-design/icons';
-import { expenseAPI, handleApiError } from '../../services/api';
+import { expenseAPI, handleApiError, shopAPI } from '../../services/api';
 import dayjs from 'dayjs';
 
 const ExpenseManagement = () => {
   const [expenses, setExpenses] = useState([]);
+  const [shops, setShops] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [shopLoading, setShopLoading] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const [stats, setStats] = useState({
     totalExpenses: 0,
@@ -63,7 +65,24 @@ const ExpenseManagement = () => {
     { value: 'mpesa', label: 'M-Pesa/Bank', color: 'blue' }
   ];
 
+  // Fetch shops data
+  const fetchShops = async () => {
+    setShopLoading(true);
+    try {
+      console.log('🏪 Fetching shops for expense management...');
+      const shopsData = await shopAPI.getAll();
+      console.log('✅ Shops loaded:', shopsData.length);
+      setShops(shopsData);
+    } catch (error) {
+      console.error('❌ Error fetching shops:', error);
+      message.warning('Failed to load shops, using default shop');
+    } finally {
+      setShopLoading(false);
+    }
+  };
+
   useEffect(() => {
+    fetchShops();
     fetchExpenses();
   }, []);
 
@@ -111,7 +130,8 @@ const ExpenseManagement = () => {
     setEditingExpense(expense);
     form.setFieldsValue({
       ...expense,
-      date: expense.date ? dayjs(expense.date) : null
+      date: expense.date ? dayjs(expense.date) : null,
+      shop: expense.shop || (shops.length > 0 ? shops[0]._id : '')
     });
     setIsModalVisible(true);
   };
@@ -144,14 +164,31 @@ const ExpenseManagement = () => {
     try {
       console.log('📝 Submitting expense with values:', values);
       
+      // Get current user data for recordedBy field
+      const currentUser = JSON.parse(localStorage.getItem('adminData') || localStorage.getItem('cashierData') || '{}');
+      const recordedBy = currentUser.name || currentUser.email || 'System';
+      
+      // Get selected shop name
+      const selectedShop = shops.find(shop => shop._id === values.shop);
+      const shopName = selectedShop?.name || 'Unknown Shop';
+
+      // Prepare complete expense data with all required fields
       const formattedValues = {
         category: values.category,
         amount: parseFloat(values.amount),
         date: values.date ? values.date.toISOString() : new Date().toISOString(),
-        paymentMethod: values.paymentMethod
+        paymentMethod: values.paymentMethod,
+        description: values.description || `${values.category} expense`,
+        recordedBy: recordedBy,
+        shop: values.shop || (shops.length > 0 ? shops[0]._id : ''),
+        shopName: shopName,
+        status: 'completed',
+        // Include any other required fields from your backend
+        notes: values.notes || '',
+        referenceNumber: `EXP-${Date.now().toString().slice(-6)}`
       };
 
-      console.log('📦 Formatted expense data:', formattedValues);
+      console.log('📦 Complete expense data being sent:', formattedValues);
 
       let result;
       if (editingExpense) {
@@ -174,7 +211,8 @@ const ExpenseManagement = () => {
       form.resetFields();
     } catch (error) {
       console.error('❌ Error submitting expense:', error);
-      message.error(handleApiError(error));
+      const errorMessage = handleApiError(error);
+      message.error(errorMessage);
     } finally {
       setFormLoading(false);
     }
@@ -194,6 +232,12 @@ const ExpenseManagement = () => {
 
   const formatDate = (date) => {
     return date ? dayjs(date).format('DD/MM/YYYY') : 'N/A';
+  };
+
+  const getShopName = (shopId) => {
+    if (!shopId) return 'Unknown Shop';
+    const shop = shops.find(s => s._id === shopId);
+    return shop?.name || 'Unknown Shop';
   };
 
   const columns = [
@@ -231,6 +275,19 @@ const ExpenseManagement = () => {
       width: 120
     },
     { 
+      title: 'Shop', 
+      dataIndex: 'shop', 
+      key: 'shop',
+      render: (shopId) => (
+        <Tag color="blue">
+          {getShopName(shopId)}
+        </Tag>
+      ),
+      width: 120,
+      filters: shops.map(shop => ({ text: shop.name, value: shop._id })),
+      onFilter: (value, record) => record.shop === value,
+    },
+    { 
       title: 'Payment Method', 
       dataIndex: 'paymentMethod', 
       key: 'paymentMethod',
@@ -242,6 +299,13 @@ const ExpenseManagement = () => {
       width: 130,
       filters: paymentMethods.map(pm => ({ text: pm.label, value: pm.value })),
       onFilter: (value, record) => record.paymentMethod === value,
+    },
+    { 
+      title: 'Recorded By', 
+      dataIndex: 'recordedBy', 
+      key: 'recordedBy',
+      render: (name) => name || 'System',
+      width: 120
     },
     { 
       title: 'Actions', 
@@ -376,7 +440,7 @@ const ExpenseManagement = () => {
         }}
         footer={null}
         destroyOnClose
-        width={500}
+        width={600}
         maskClosable={false}
       >
         <Form 
@@ -387,7 +451,8 @@ const ExpenseManagement = () => {
             amount: 0,
             paymentMethod: 'cash',
             category: 'other',
-            date: dayjs()
+            date: dayjs(),
+            shop: shops.length > 0 ? shops[0]._id : ''
           }}
         >
           <Form.Item 
@@ -400,6 +465,21 @@ const ExpenseManagement = () => {
               format="YYYY-MM-DD"
               placeholder="Select date"
               disabledDate={(current) => current && current > dayjs().endOf('day')}
+            />
+          </Form.Item>
+
+          <Form.Item 
+            name="shop" 
+            label="Shop" 
+            rules={[{ required: true, message: 'Please select a shop' }]}
+          >
+            <Select 
+              placeholder="Select shop"
+              loading={shopLoading}
+              options={shops.map(shop => ({
+                value: shop._id,
+                label: shop.name
+              }))}
             />
           </Form.Item>
 
@@ -448,6 +528,26 @@ const ExpenseManagement = () => {
               min="0.01" 
               placeholder="Enter amount"
               addonBefore="KES"
+            />
+          </Form.Item>
+
+          <Form.Item 
+            name="description" 
+            label="Description"
+          >
+            <Input.TextArea 
+              placeholder="Enter expense description (optional)"
+              rows={3}
+            />
+          </Form.Item>
+
+          <Form.Item 
+            name="notes" 
+            label="Notes"
+          >
+            <Input.TextArea 
+              placeholder="Additional notes (optional)"
+              rows={2}
             />
           </Form.Item>
 

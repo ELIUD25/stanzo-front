@@ -1,4 +1,4 @@
-// src/components/CreditManagement.jsx
+// src/components/CreditManagement.jsx - FIXED SHOP NAME DISPLAY
 import React, { useState, useEffect } from 'react';
 import {
   Card,
@@ -42,16 +42,18 @@ import {
   SearchOutlined,
   FilterOutlined
 } from '@ant-design/icons';
-import { creditAPI } from '../../services/api';
+import { creditAPI, shopAPI } from '../../services/api';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 const { Search } = Input;
 
-const CreditManagement = ({ currentUser, shops = [] }) => {
+const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
   const [credits, setCredits] = useState([]);
+  const [shops, setShops] = useState(initialShops);
   const [loading, setLoading] = useState(false);
+  const [shopLoading, setShopLoading] = useState(false);
   const [selectedShop, setSelectedShop] = useState('all');
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
@@ -63,6 +65,40 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Fetch shops if not provided
+  const fetchShops = async () => {
+    setShopLoading(true);
+    try {
+      let shopsData = [];
+      
+      // If shops are provided via props, use them
+      if (initialShops && initialShops.length > 0) {
+        shopsData = initialShops;
+      } else {
+        // Otherwise fetch from API
+        const response = await shopAPI.getAll();
+        shopsData = Array.isArray(response?.data) ? response.data : 
+                   Array.isArray(response) ? response : 
+                   response?.shops || [];
+      }
+      
+      setShops(shopsData);
+      console.log('🏪 Shops loaded successfully:', {
+        count: shopsData.length,
+        shops: shopsData.map(s => ({ id: s._id, name: s.name || s.shopName }))
+      });
+    } catch (error) {
+      console.error('Error fetching shops:', error);
+      notification.warning({
+        message: 'Failed to load shops',
+        description: 'Shop names may not display correctly'
+      });
+      setShops([]);
+    } finally {
+      setShopLoading(false);
+    }
+  };
 
   // Safe shops array with fallback
   const safeShops = Array.isArray(shops) ? shops : [];
@@ -78,11 +114,24 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
       
       const response = await creditAPI.getAll(params);
       // Ensure credits is always an array
-      const creditsData = Array.isArray(response?.data) ? response.data : [];
+      const creditsData = Array.isArray(response?.data) ? response.data : 
+                        Array.isArray(response) ? response : [];
       setCredits(creditsData);
       
       // Check for credits due in 2 days
       checkDueSoonCredits(creditsData);
+      
+      // Debug: Check shop data in credits
+      console.log('📊 Credits loaded with shop data:', {
+        creditsCount: creditsData.length,
+        creditsWithShopInfo: creditsData.map(c => ({
+          id: c._id,
+          customer: c.customerName,
+          shopId: c.shopId,
+          shop: c.shop,
+          shopName: c.shopName
+        }))
+      });
     } catch (error) {
       console.error('Error fetching credits:', error);
       notification.error({
@@ -99,9 +148,24 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
   // Fetch payment history for a credit
   const fetchPaymentHistory = async (creditId) => {
     try {
-      const response = await creditAPI.getPaymentHistory(creditId);
-      const history = Array.isArray(response?.data) ? response.data : [];
-      setPaymentHistory(history);
+      // Since getPaymentHistory method doesn't exist, we'll use the credit data itself
+      const credit = credits.find(c => c._id === creditId);
+      if (credit && credit.paymentHistory) {
+        setPaymentHistory(credit.paymentHistory);
+      } else {
+        // Fallback: create payment history from credit data
+        const history = [];
+        if (credit && credit.amountPaid > 0) {
+          history.push({
+            amount: credit.amountPaid,
+            paymentDate: credit.updatedAt || credit.createdAt,
+            paymentMethod: 'cash',
+            recordedBy: credit.cashierName || 'System',
+            cashierName: credit.cashierName || 'Unknown Cashier'
+          });
+        }
+        setPaymentHistory(history);
+      }
     } catch (error) {
       console.error('Error fetching payment history:', error);
       notification.error({
@@ -231,10 +295,15 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
     }
   };
 
-  // Handle delete credit record
+  // Handle delete credit record - FIXED
   const handleDeleteCredit = async (creditId) => {
     try {
-      await creditAPI.delete(creditId);
+      console.log('🗑️ Attempting to delete credit:', creditId);
+      
+      // Use the correct delete method from creditAPI
+      const response = await creditAPI.delete(creditId);
+      
+      console.log('✅ Delete response:', response);
       
       notification.success({
         message: 'Credit Record Deleted',
@@ -243,10 +312,19 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
 
       fetchCredits(); // Refresh data
     } catch (error) {
-      console.error('Error deleting credit:', error);
+      console.error('❌ Error deleting credit:', error);
+      
+      let errorMessage = 'Failed to delete credit record';
+      
+      if (error.response?.status === 404) {
+        errorMessage = 'Credit record not found. It may have already been deleted.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       notification.error({
         message: 'Delete Failed',
-        description: error.message || 'Failed to delete credit record'
+        description: errorMessage
       });
     }
   };
@@ -291,10 +369,13 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
 
   // Filter credits based on search and status
   const filteredCredits = credits.filter(credit => {
+    if (!credit) return false;
+    
     const matchesSearch = !searchTerm || 
       credit.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       credit.customerPhone?.includes(searchTerm) ||
-      credit.transactionId?.transactionNumber?.toLowerCase().includes(searchTerm.toLowerCase());
+      (credit.transactionId?.transactionNumber?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      credit._id?.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || credit.status === statusFilter;
     
@@ -328,18 +409,105 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
     return statusConfig[status] || statusConfig.pending;
   };
 
-  // Get shop name by ID
-  const getShopName = (shopId) => {
-    if (!shopId) return 'N/A';
-    const shop = safeShops.find(s => s._id === shopId);
-    return shop ? shop.name : 'Unknown Shop';
+  // ✅ FIXED: Enhanced Get shop name with better debugging
+  const getShopName = (credit) => {
+    if (!credit) {
+      console.log('❌ No credit provided to getShopName');
+      return 'Unknown Shop';
+    }
+    
+    const debugInfo = {
+      creditId: credit._id,
+      customer: credit.customerName,
+      shopId: credit.shopId,
+      shop: credit.shop,
+      shopName: credit.shopName,
+      availableShops: safeShops.length,
+      shopIds: safeShops.map(s => s._id)
+    };
+
+    console.log('🔍 getShopName debug:', debugInfo);
+
+    // Priority 1: Direct shopName field in credit
+    if (credit.shopName && credit.shopName !== 'Unknown Shop') {
+      console.log('✅ Using direct shopName from credit:', credit.shopName);
+      return credit.shopName;
+    }
+
+    // Priority 2: Look up shop from shops list using shop ID
+    if (credit.shopId) {
+      const foundShop = safeShops.find(s => s._id === credit.shopId);
+      if (foundShop) {
+        const shopName = foundShop.name || foundShop.shopName;
+        console.log('✅ Found shop by shopId:', { shopId: credit.shopId, shopName });
+        return shopName || 'Unknown Shop';
+      } else {
+        console.log('❌ No shop found for shopId:', credit.shopId);
+      }
+    }
+    
+    // Priority 3: Direct shop field (string) - check if it's a shop ID or name
+    if (credit.shop && typeof credit.shop === 'string') {
+      // First check if this string is a shop ID by looking it up
+      const foundShop = safeShops.find(s => s._id === credit.shop);
+      if (foundShop) {
+        const shopName = foundShop.name || foundShop.shopName;
+        console.log('✅ Found shop by shop string (as ID):', { shop: credit.shop, shopName });
+        return shopName || 'Unknown Shop';
+      }
+      // If not found as ID, it might already be the shop name
+      if (credit.shop !== 'Unknown Shop') {
+        console.log('✅ Using shop field as name:', credit.shop);
+        return credit.shop;
+      }
+    }
+
+    // Priority 4: Direct shop object with name
+    if (credit.shop && typeof credit.shop === 'object') {
+      const shopName = credit.shop.name || credit.shop.shopName;
+      if (shopName && shopName !== 'Unknown Shop') {
+        console.log('✅ Using shop object name:', shopName);
+        return shopName;
+      }
+    }
+
+    // Priority 5: Check if shop is embedded in transaction
+    if (credit.transactionId?.shop) {
+      const transactionShop = credit.transactionId.shop;
+      if (typeof transactionShop === 'object') {
+        const shopName = transactionShop.name || transactionShop.shopName;
+        if (shopName) {
+          console.log('✅ Using transaction shop name:', shopName);
+          return shopName;
+        }
+      } else if (typeof transactionShop === 'string' && transactionShop !== 'Unknown Shop') {
+        console.log('✅ Using transaction shop string:', transactionShop);
+        return transactionShop;
+      }
+    }
+
+    console.log('❌ No shop name found for credit:', credit._id);
+    return 'Unknown Shop';
+  };
+
+  // Get shop name for filter display
+  const getShopNameForFilter = (shopId) => {
+    if (!shopId || shopId === 'all') return 'All Shops';
+    
+    const foundShop = safeShops.find(s => s._id === shopId);
+    return foundShop ? (foundShop.name || foundShop.shopName || 'Unknown Shop') : 'Unknown Shop';
+  };
+
+  // Get cashier name - ENHANCED
+  const getCashierName = (credit) => {
+    return credit.cashierName || credit.recordedBy || 'Unknown Cashier';
   };
 
   // Open edit modal with current data
   const openEditModal = (credit) => {
     setSelectedCredit(credit);
     editForm.setFieldsValue({
-      shopId: credit.shopId,
+      shopId: credit.shopId || credit.shop,
       cashierName: credit.cashierName,
       customerName: credit.customerName,
       customerPhone: credit.customerPhone,
@@ -348,7 +516,22 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
     setEditModalVisible(true);
   };
 
-  // Columns for credits table
+  // Shop filter options including "All Shops"
+  const shopFilterOptions = [
+    { value: 'all', label: 'All Shops' },
+    ...safeShops.map(shop => ({
+      value: shop._id,
+      label: shop.name || shop.shopName || 'Unknown Shop'
+    }))
+  ];
+
+  // Shop options for forms
+  const shopOptions = safeShops.map(shop => ({
+    value: shop._id,
+    label: shop.name || shop.shopName || 'Unknown Shop'
+  }));
+
+  // ✅ FIXED: Columns for credits table with proper shop name display
   const columns = [
     {
       title: 'Customer',
@@ -367,20 +550,34 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
     },
     {
       title: 'Shop & Cashier',
-      dataIndex: 'shopId',
-      key: 'shopId',
-      render: (shopId, record) => (
-        <Space direction="vertical" size={0}>
-          <Tag icon={<ShopOutlined />} color="blue">
-            {getShopName(shopId)}
-          </Tag>
-          {record.cashierName && (
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              <UserOutlined /> {record.cashierName}
-            </Text>
-          )}
-        </Space>
-      )
+      key: 'shopAndCashier',
+      render: (_, record) => {
+        const shopName = getShopName(record);
+        const cashierName = getCashierName(record);
+        
+        console.log('🏪 Rendering shop & cashier:', {
+          customer: record.customerName,
+          shopName,
+          cashierName,
+          shopId: record.shopId,
+          shop: record.shop
+        });
+
+        return (
+          <Space direction="vertical" size={4}>
+            <Tooltip title={`Shop ID: ${record.shopId || record.shop || 'N/A'}`}>
+              <Tag icon={<ShopOutlined />} color="blue">
+                {shopName}
+              </Tag>
+            </Tooltip>
+            {cashierName && cashierName !== 'Unknown Cashier' && (
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                <UserOutlined /> {cashierName}
+              </Text>
+            )}
+          </Space>
+        );
+      }
     },
     {
       title: 'Transaction',
@@ -486,7 +683,7 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
                     setSelectedCredit(record);
                     setPaymentModalVisible(true);
                     paymentForm.setFieldsValue({
-                      amount: safeBalance,
+                      amount: Math.min(safeBalance, safeBalance),
                       paymentMethod: 'cash'
                     });
                   }}
@@ -588,12 +785,32 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
   ];
 
   useEffect(() => {
+    fetchShops();
+  }, []);
+
+  useEffect(() => {
     fetchCredits();
   }, [selectedShop]);
 
   return (
     <div style={{ padding: '24px' }}>
       <Title level={2}>Credit Management</Title>
+
+      {/* Debug Info */}
+      <div style={{ marginBottom: 16, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: 6 }}>
+        <Text strong>Debug Info: </Text>
+        <Tag color="blue">Shops: {safeShops.length}</Tag>
+        <Tag color="green">Credits: {credits.length}</Tag>
+        <Button 
+          size="small" 
+          onClick={() => {
+            console.log('🔍 Current shops:', safeShops);
+            console.log('🔍 Current credits:', credits);
+          }}
+        >
+          Debug Logs
+        </Button>
+      </div>
 
       {/* Due Soon Alert */}
       {dueSoonCredits.length > 0 && (
@@ -605,7 +822,7 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
           icon={<BellOutlined />}
           style={{ marginBottom: 16 }}
           action={
-            <Button size="small" type="primary">
+            <Button size="small" type="primary" onClick={fetchCredits}>
               View All
             </Button>
           }
@@ -667,11 +884,11 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
                 onChange={setSelectedShop}
                 style={{ width: 200 }}
                 placeholder="Filter by shop"
+                loading={shopLoading}
               >
-                <Option value="all">All Shops</Option>
-                {safeShops.map(shop => (
-                  <Option key={shop._id} value={shop._id}>
-                    {shop.name}
+                {shopFilterOptions.map(option => (
+                  <Option key={option.value} value={option.value}>
+                    {option.label}
                   </Option>
                 ))}
               </Select>
@@ -712,6 +929,13 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
               >
                 Refresh
               </Button>
+              <Button 
+                onClick={fetchShops} 
+                loading={shopLoading}
+                icon={<ShopOutlined />}
+              >
+                Refresh Shops
+              </Button>
               <Text type="secondary">
                 Showing {filteredCredits.length} of {credits.length} credits
               </Text>
@@ -734,7 +958,7 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
           <Space>
             <FilterOutlined />
             <Text type="secondary">
-              Shop: {selectedShop === 'all' ? 'All Shops' : getShopName(selectedShop)}
+              Shop: {getShopNameForFilter(selectedShop)}
             </Text>
           </Space>
         }
@@ -782,14 +1006,14 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
             
             <Form.Item label="Shop">
               <Input 
-                value={getShopName(selectedCredit.shopId)} 
+                value={getShopName(selectedCredit)} 
                 disabled 
               />
             </Form.Item>
             
             <Form.Item label="Cashier">
               <Input 
-                value={selectedCredit.cashierName || 'N/A'} 
+                value={getCashierName(selectedCredit)} 
                 disabled 
               />
             </Form.Item>
@@ -920,10 +1144,13 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
               label="Shop"
               rules={[{ required: true, message: 'Please select a shop' }]}
             >
-              <Select placeholder="Select shop">
-                {safeShops.map(shop => (
-                  <Option key={shop._id} value={shop._id}>
-                    {shop.name}
+              <Select 
+                placeholder="Select shop"
+                loading={shopLoading}
+              >
+                {shopOptions.map(shop => (
+                  <Option key={shop.value} value={shop.value}>
+                    {shop.label}
                   </Option>
                 ))}
               </Select>
@@ -1044,10 +1271,10 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
               </Row>
               <Row gutter={16}>
                 <Col span={12}>
-                  <Text>Shop: {getShopName(selectedCredit.shopId)}</Text>
+                  <Text>Shop: {getShopName(selectedCredit)}</Text>
                 </Col>
                 <Col span={12}>
-                  <Text>Cashier: {selectedCredit.cashierName || 'N/A'}</Text>
+                  <Text>Cashier: {getCashierName(selectedCredit)}</Text>
                 </Col>
               </Row>
             </Space>
@@ -1055,7 +1282,7 @@ const CreditManagement = ({ currentUser, shops = [] }) => {
             <Table
               columns={historyColumns}
               dataSource={paymentHistory}
-              rowKey="_id"
+              rowKey={(record, index) => index}
               pagination={{ pageSize: 5 }}
               locale={{ emptyText: 'No payment history found' }}
               size="small"

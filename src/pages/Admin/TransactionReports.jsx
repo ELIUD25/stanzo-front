@@ -77,10 +77,9 @@ const { TabPane } = Tabs;
 const { Panel } = Collapse;
 
 // =============================================
-// SHARED UTILITIES (ALIGNED WITH ADMIN DASHBOARD)
+// UPDATED CALCULATION UTILITIES (ALIGNED WITH IMAGE EXAMPLES)
 // =============================================
 
-// Enhanced calculation utilities matching Admin Dashboard
 const CalculationUtils = {
   safeNumber: (value, fallback = 0) => {
     if (value === null || value === undefined || value === '') return fallback;
@@ -108,6 +107,21 @@ const CalculationUtils = {
     return value >= 0 ? <RiseOutlined /> : <FallOutlined />;
   },
 
+  // UPDATED: Simplified profit calculation as shown in images
+  calculateProfit: (revenue, cost) => {
+    const revenueNum = CalculationUtils.safeNumber(revenue);
+    const costNum = CalculationUtils.safeNumber(cost);
+    return revenueNum - costNum;
+  },
+
+  // UPDATED: Calculate profit margin as shown in images
+  calculateProfitMargin: (revenue, profit) => {
+    const revenueNum = CalculationUtils.safeNumber(revenue);
+    const profitNum = CalculationUtils.safeNumber(profit);
+    if (revenueNum <= 0) return 100.0; // Default to 100% as shown in images
+    return (profitNum / revenueNum) * 100;
+  },
+
   validateTransactionData: (transaction) => {
     if (!transaction || typeof transaction !== 'object') {
       return CalculationUtils.createFallbackTransaction();
@@ -126,8 +140,9 @@ const CalculationUtils = {
         items.reduce((sum, item) => sum + (CalculationUtils.safeNumber(item.buyingPrice || item.costPrice) * CalculationUtils.safeNumber(item.quantity)), 0)
       );
 
-      const profit = totalAmount - cost;
-      const profitMargin = totalAmount > 0 ? (profit / totalAmount) * 100 : 0;
+      // UPDATED: Use simplified profit calculation
+      const profit = CalculationUtils.calculateProfit(totalAmount, cost);
+      const profitMargin = CalculationUtils.calculateProfitMargin(totalAmount, profit);
 
       const validated = {
         _id: transaction._id?.toString() || `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -174,7 +189,7 @@ const CalculationUtils = {
     totalAmount: 0,
     cost: 0,
     profit: 0,
-    profitMargin: 0,
+    profitMargin: 100.0, // UPDATED: Default to 100% as shown in images
     paymentMethod: 'cash',
     status: 'completed',
     customerName: 'Walk-in Customer',
@@ -253,8 +268,9 @@ const CalculationUtils = {
           const unitPrice = CalculationUtils.safeNumber(item.unitPrice || item.price);
           const totalPrice = CalculationUtils.safeNumber(item.totalPrice) || (unitPrice * quantity);
           const cost = buyingPrice * quantity;
-          const profit = totalPrice - cost;
-          const profitMargin = totalPrice > 0 ? (profit / totalPrice) * 100 : 0;
+          // UPDATED: Use simplified profit calculation
+          const profit = CalculationUtils.calculateProfit(totalPrice, cost);
+          const profitMargin = CalculationUtils.calculateProfitMargin(totalPrice, profit);
 
           return {
             ...item,
@@ -273,8 +289,9 @@ const CalculationUtils = {
 
         const totalAmount = CalculationUtils.safeNumber(validatedSale.totalAmount) || itemsWithProfit.reduce((sum, item) => sum + item.totalPrice, 0);
         const totalCost = itemsWithProfit.reduce((sum, item) => sum + item.cost, 0);
-        const totalProfit = totalAmount - totalCost;
-        const profitMargin = totalAmount > 0 ? (totalProfit / totalAmount) * 100 : 0;
+        // UPDATED: Use simplified profit calculation
+        const totalProfit = CalculationUtils.calculateProfit(totalAmount, totalCost);
+        const profitMargin = CalculationUtils.calculateProfitMargin(totalAmount, totalProfit);
         const itemsCount = itemsWithProfit.reduce((sum, item) => sum + item.quantity, 0);
 
         return {
@@ -304,7 +321,8 @@ const CalculationUtils = {
     // Calculate financial statistics INCLUDING credit sales
     const totalRevenue = validSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
     const totalCost = validSales.reduce((sum, sale) => sum + sale.totalCost, 0);
-    const totalProfit = validSales.reduce((sum, sale) => sum + sale.totalProfit, 0);
+    // UPDATED: Use simplified profit calculation
+    const totalProfit = CalculationUtils.calculateProfit(totalRevenue, totalCost);
     
     // Calculate credit-specific metrics
     const creditSales = validSales.filter(sale => sale.paymentMethod === 'credit');
@@ -321,8 +339,9 @@ const CalculationUtils = {
     }
     const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + CalculationUtils.safeNumber(expense.amount), 0);
     
-    const netProfit = totalProfit - totalExpenses;
-    const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    // UPDATED: Use simplified profit calculation
+    const netProfit = CalculationUtils.calculateProfit(totalProfit, totalExpenses);
+    const profitMargin = CalculationUtils.calculateProfitMargin(totalRevenue, netProfit);
     const averageTransactionValue = validSales.length > 0 ? totalRevenue / validSales.length : 0;
     const totalItemsSold = validSales.reduce((sum, sale) => sum + sale.itemsCount, 0);
 
@@ -392,7 +411,7 @@ const CalculationUtils = {
     items: [],
     cost: 0,
     profit: 0,
-    profitMargin: 0,
+    profitMargin: 100.0, // UPDATED: Default to 100% as shown in images
     itemsCount: 0,
     totalAmount: 0,
     status: 'completed'
@@ -405,7 +424,7 @@ const CalculationUtils = {
     totalProfit: 0,
     totalExpenses: 0,
     netProfit: 0,
-    profitMargin: 0,
+    profitMargin: 100.0, // UPDATED: Default to 100% as shown in images
     totalProducts: 0,
     totalShops: 0,
     totalCashiers: 0,
@@ -469,7 +488,8 @@ const CalculationUtils = {
     
     const result = Object.values(productSales)
       .map(product => {
-        const profitMargin = product.totalRevenue > 0 ? (product.totalProfit / product.totalRevenue) * 100 : 0;
+        // UPDATED: Use simplified profit calculation
+        const profitMargin = CalculationUtils.calculateProfitMargin(product.totalRevenue, product.totalProfit);
         const averageQuantity = product.transactions > 0 ? product.totalSold / product.transactions : 0;
         const revenuePerUnit = product.totalSold > 0 ? product.totalRevenue / product.totalSold : 0;
         
@@ -521,7 +541,7 @@ const CalculationUtils = {
           cost: 0,
           itemsSold: 0,
           averageTransaction: 0,
-          profitMargin: 0
+          profitMargin: 100.0 // UPDATED: Default to 100% as shown in images
         };
       }
       shopSales[shopId].revenue += CalculationUtils.safeNumber(sale.totalAmount);
@@ -534,7 +554,8 @@ const CalculationUtils = {
     const result = Object.values(shopSales)
       .map((data) => {
         const averageTransaction = data.transactions > 0 ? data.revenue / data.transactions : 0;
-        const profitMargin = data.revenue > 0 ? (data.profit / data.revenue) * 100 : 0;
+        // UPDATED: Use simplified profit calculation
+        const profitMargin = CalculationUtils.calculateProfitMargin(data.revenue, data.profit);
         const efficiency = data.transactions > 0 ? data.itemsSold / data.transactions : 0;
         
         return { 
@@ -635,7 +656,8 @@ const CalculationUtils = {
         profit: parseFloat(periodData.profit.toFixed(2)),
         cost: parseFloat(periodData.cost.toFixed(2)),
         averageTransaction: periodData.transactions > 0 ? periodData.revenue / periodData.transactions : 0,
-        profitMargin: periodData.revenue > 0 ? (periodData.profit / periodData.revenue) * 100 : 0
+        // UPDATED: Use simplified profit calculation
+        profitMargin: CalculationUtils.calculateProfitMargin(periodData.revenue, periodData.profit)
       }))
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-days);
@@ -658,7 +680,7 @@ const CalculationUtils = {
 };
 
 // =============================================
-// REACT COMPONENTS
+// UPDATED COMPONENTS (REMOVED REVENUE TRENDS, REARRANGED ORDER)
 // =============================================
 
 // Shop Filter Component
@@ -808,6 +830,336 @@ const FinancialOverview = ({ stats, loading, selectedShop, shops }) => {
   );
 };
 
+// UPDATED: Shop Performance Component (Now shows at the top as in images)
+const ShopPerformance = ({ transactions, shops, loading, selectedShop }) => {
+  const shopPerformance = useMemo(() => {
+    return CalculationUtils.calculateShopPerformance(transactions, shops);
+  }, [transactions, shops]);
+
+  return (
+    <Card 
+      title={
+        <Space>
+          <ShopOutlined />
+          Shop Performance Comparison
+          <Badge count={shopPerformance.length} showZero color="#1890ff" />
+        </Space>
+      } 
+      style={{ marginBottom: 24 }}
+      loading={loading}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">
+          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
+        </Text>
+      </div>
+      
+      {shopPerformance.length > 0 ? (
+        <List
+          dataSource={shopPerformance}
+          renderItem={(shop, index) => (
+            <List.Item>
+              <List.Item.Meta
+                avatar={
+                  <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
+                    <Avatar 
+                      style={{ 
+                        backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
+                        color: index < 3 ? '#fff' : '#000'
+                      }}
+                    >
+                      {shop.name?.charAt(0)?.toUpperCase() || 'S'}
+                    </Avatar>
+                  </Badge>
+                }
+                title={
+                  <Space>
+                    <Text strong>{shop.name}</Text>
+                    {index < 3 && <Tag color="gold">Top Performer</Tag>}
+                    <Tag color={shop.performance.color}>{shop.performance.label}</Tag>
+                  </Space>
+                }
+                description={
+                  <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
+                        <Text strong style={{ color: '#1890ff' }}>
+                          {CalculationUtils.formatCurrency(shop.revenue)}
+                        </Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Transactions</Text>
+                        <Text strong>{shop.transactions}</Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Avg. Transaction</Text>
+                        <Text strong>
+                          {CalculationUtils.formatCurrency(shop.averageTransaction)}
+                        </Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
+                        <Text strong style={{ color: '#3f8600' }}>
+                          {shop.profitMargin.toFixed(1)}%
+                        </Text>
+                      </Space>
+                    </Col>
+                  </Row>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      ) : (
+        <Empty description="No shop performance data available" />
+      )}
+    </Card>
+  );
+};
+
+// UPDATED: Cashier Performance Component (Now shows second as in images)
+const CashierPerformance = ({ transactions, cashiers, loading, selectedShop, shops }) => {
+  const cashierPerformance = useMemo(() => {
+    let filteredTransactions = transactions;
+    if (selectedShop && selectedShop !== 'all') {
+      filteredTransactions = transactions.filter(transaction => {
+        const transactionShopId = transaction.shopId || transaction.shop;
+        return transactionShopId === selectedShop;
+      });
+    }
+
+    const performance = {};
+    
+    filteredTransactions.forEach(transaction => {
+      const cashierName = transaction.cashierName || 'Unknown Cashier';
+      if (!performance[cashierName]) {
+        performance[cashierName] = {
+          name: cashierName,
+          revenue: 0,
+          transactions: 0,
+          profit: 0,
+          itemsSold: 0,
+          creditSales: 0,
+          creditAmount: 0
+        };
+      }
+      performance[cashierName].revenue += transaction.totalAmount || 0;
+      performance[cashierName].profit += transaction.profit || 0;
+      performance[cashierName].transactions += 1;
+      performance[cashierName].itemsSold += transaction.itemsCount || 0;
+      
+      if (transaction.paymentMethod === 'credit') {
+        performance[cashierName].creditSales += 1;
+        performance[cashierName].creditAmount += transaction.totalAmount || 0;
+      }
+    });
+    
+    return Object.values(performance)
+      .map(cashier => ({
+        ...cashier,
+        averageTransaction: cashier.transactions > 0 ? cashier.revenue / cashier.transactions : 0,
+        // UPDATED: Use simplified profit calculation
+        profitMargin: CalculationUtils.calculateProfitMargin(cashier.revenue, cashier.profit),
+        creditRatio: cashier.revenue > 0 ? (cashier.creditAmount / cashier.revenue) * 100 : 0
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [transactions, selectedShop]);
+
+  return (
+    <Card 
+      title={
+        <Space>
+          <TeamOutlined />
+          Cashier Performance
+          <Badge count={cashierPerformance.length} showZero color="#1890ff" />
+        </Space>
+      } 
+      style={{ marginBottom: 24 }}
+      loading={loading}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">
+          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
+        </Text>
+      </div>
+      
+      {cashierPerformance.length > 0 ? (
+        <List
+          dataSource={cashierPerformance}
+          renderItem={(cashier, index) => (
+            <List.Item>
+              <List.Item.Meta
+                avatar={
+                  <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#52c41a' : '#d9d9d9'}>
+                    <Avatar 
+                      style={{ 
+                        backgroundColor: index < 3 ? '#52c41a' : '#d9d9d9',
+                        color: index < 3 ? '#fff' : '#000'
+                      }}
+                    >
+                      {cashier.name?.charAt(0)?.toUpperCase() || 'C'}
+                    </Avatar>
+                  </Badge>
+                }
+                title={
+                  <Space>
+                    <Text strong>{cashier.name}</Text>
+                    {index < 3 && <Tag color="green">Top Performer</Tag>}
+                    {cashier.creditSales > 0 && (
+                      <Tag color="orange">{cashier.creditSales} credit sales</Tag>
+                    )}
+                  </Space>
+                }
+                description={
+                  <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
+                        <Text strong style={{ color: '#1890ff' }}>
+                          {CalculationUtils.formatCurrency(cashier.revenue)}
+                        </Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Transactions</Text>
+                        <Text strong>{cashier.transactions}</Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Avg. Transaction</Text>
+                        <Text strong>
+                          {CalculationUtils.formatCurrency(cashier.averageTransaction)}
+                        </Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Space direction="vertical" size={0}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
+                        <Text strong style={{ color: '#3f8600' }}>
+                          {cashier.profitMargin.toFixed(1)}%
+                        </Text>
+                      </Space>
+                    </Col>
+                  </Row>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      ) : (
+        <Empty description="No cashier performance data available" />
+      )}
+    </Card>
+  );
+};
+
+// UPDATED: Product Performance Component (Now shows third as in images)
+const ProductPerformance = ({ topProducts, loading, selectedShop, shops }) => (
+  <Card 
+    title={
+      <Space>
+        <AppstoreOutlined />
+        Product Performance Analysis
+        <Badge count={topProducts.length} showZero color="#1890ff" />
+      </Space>
+    } 
+    style={{ marginBottom: 24 }}
+    loading={loading}
+  >
+    <div style={{ marginBottom: 16 }}>
+      <Text type="secondary">
+        Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
+      </Text>
+    </div>
+    
+    {topProducts.length > 0 ? (
+      <List
+        dataSource={topProducts}
+        renderItem={(product, index) => (
+          <List.Item
+            actions={[
+              <Tooltip key="view" title="View product details">
+                <Button type="link" icon={<EyeOutlined />} size="small" />
+              </Tooltip>
+            ]}
+          >
+            <List.Item.Meta
+              avatar={
+                <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
+                  <Avatar 
+                    style={{ 
+                      backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
+                      color: index < 3 ? '#fff' : '#000'
+                    }}
+                  >
+                    {product.name?.charAt(0)?.toUpperCase() || 'P'}
+                  </Avatar>
+                </Badge>
+              }
+              title={
+                <Space>
+                  <Text strong style={{ maxWidth: 200 }} ellipsis={{ tooltip: product.name }}>
+                    {product.name}
+                  </Text>
+                  <Tag color="blue">{product.totalSold} units</Tag>
+                  {index < 3 && <Tag color="gold">Top Seller</Tag>}
+                </Space>
+              }
+              description={
+                <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
+                  <Col xs={24} sm={6}>
+                    <Space direction="vertical" size={0}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
+                      <Text strong style={{ color: '#1890ff' }}>
+                        {CalculationUtils.formatCurrency(product.totalRevenue)}
+                      </Text>
+                    </Space>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Space direction="vertical" size={0}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Profit</Text>
+                      <Text strong style={{ color: CalculationUtils.getProfitColor(product.totalProfit) }}>
+                        {CalculationUtils.formatCurrency(product.totalProfit)}
+                      </Text>
+                    </Space>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Space direction="vertical" size={0}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Avg. Price</Text>
+                      <Text strong>
+                        {CalculationUtils.formatCurrency(product.revenuePerUnit)}
+                      </Text>
+                    </Space>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Space direction="vertical" size={0}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
+                      <Text strong style={{ color: '#3f8600' }}>
+                        {product.profitMargin.toFixed(1)}%
+                      </Text>
+                    </Space>
+                  </Col>
+                </Row>
+              }
+            />
+          </List.Item>
+        )}
+      />
+    ) : (
+      <Empty description="No product sales data available" />
+    )}
+  </Card>
+);
+
 // Credit Analysis Component
 const CreditAnalysis = ({ credits, stats, loading, selectedShop, shops }) => {
   const creditMetrics = [
@@ -929,419 +1281,10 @@ const CreditAnalysis = ({ credits, stats, loading, selectedShop, shops }) => {
   );
 };
 
-// Enhanced Revenue Trends Component
-const RevenueTrendChart = ({ data, stats, loading, selectedShop, shops }) => {
-  const [selectedPeriod, setSelectedPeriod] = useState('7d');
-
-  const periods = [
-    { key: '7d', label: '7 Days', days: 7 },
-    { key: '30d', label: '30 Days', days: 30 },
-    { key: '90d', label: '90 Days', days: 90 }
-  ];
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <LineChartOutlined />
-          Revenue & Profit Trends
-          <Select 
-            size="small" 
-            value={selectedPeriod}
-            onChange={setSelectedPeriod}
-            style={{ width: 100 }}
-          >
-            {periods.map(period => (
-              <Option key={period.key} value={period.key}>{period.label}</Option>
-            ))}
-          </Select>
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">
-          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Text>
-      </div>
-      
-      <Row gutter={[16, 16]}>
-        <Col span={24}>
-          <div style={{ 
-            height: 200, 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            flexDirection: 'column',
-            background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
-            borderRadius: 8,
-            padding: 20
-          }}>
-            {data?.length ? (
-              <>
-                <LineChartOutlined style={{ fontSize: 48, color: '#1890ff', marginBottom: 16 }} />
-                <Text strong style={{ fontSize: 16, marginBottom: 8 }}>
-                  Revenue Analytics - Last {periods.find(p => p.key === selectedPeriod)?.days} Days
-                </Text>
-                <Text type="secondary" style={{ textAlign: 'center' }}>
-                  Showing {data.length} days of transaction data with {stats.totalTransactions || 0} transactions
-                </Text>
-                {stats && (
-                  <div style={{ marginTop: 12, textAlign: 'center' }}>
-                    <Text strong>Period Performance: </Text>
-                    <Text style={{ color: CalculationUtils.getProfitColor(stats.netProfit) }}>
-                      {CalculationUtils.formatCurrency(stats.netProfit)}
-                    </Text>
-                    {stats.creditSalesCount > 0 && (
-                      <div style={{ marginTop: 8 }}>
-                        <Text type="secondary">
-                          Includes {stats.creditSalesCount} credit sales ({CalculationUtils.formatCurrency(stats.totalCreditAmount)})
-                        </Text>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                <LineChartOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
-                <Text type="secondary">No trend data available for the selected period</Text>
-              </>
-            )}
-          </div>
-        </Col>
-      </Row>
-    </Card>
-  );
-};
-
-// Enhanced Top Products Component
-const TopProductsAnalysis = ({ topProducts, loading, selectedShop, shops }) => (
-  <Card 
-    title={
-      <Space>
-        <AppstoreOutlined />
-        Product Performance Analysis
-        <Badge count={topProducts.length} showZero color="#1890ff" />
-      </Space>
-    } 
-    style={{ marginBottom: 24 }}
-    loading={loading}
-  >
-    <div style={{ marginBottom: 16 }}>
-      <Text type="secondary">
-        Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-      </Text>
-    </div>
-    
-    {topProducts.length > 0 ? (
-      <List
-        dataSource={topProducts}
-        renderItem={(product, index) => (
-          <List.Item
-            actions={[
-              <Tooltip key="view" title="View product details">
-                <Button type="link" icon={<EyeOutlined />} size="small" />
-              </Tooltip>
-            ]}
-          >
-            <List.Item.Meta
-              avatar={
-                <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
-                  <Avatar 
-                    style={{ 
-                      backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
-                      color: index < 3 ? '#fff' : '#000'
-                    }}
-                  >
-                    {product.name?.charAt(0)?.toUpperCase() || 'P'}
-                  </Avatar>
-                </Badge>
-              }
-              title={
-                <Space>
-                  <Text strong style={{ maxWidth: 200 }} ellipsis={{ tooltip: product.name }}>
-                    {product.name}
-                  </Text>
-                  <Tag color="blue">{product.totalSold} units</Tag>
-                  {index < 3 && <Tag color="gold">Top Seller</Tag>}
-                </Space>
-              }
-              description={
-                <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
-                  <Col xs={24} sm={8}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
-                      <Text strong style={{ color: '#1890ff' }}>
-                        {CalculationUtils.formatCurrency(product.totalRevenue)}
-                      </Text>
-                    </Space>
-                  </Col>
-                  <Col xs={24} sm={8}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Profit</Text>
-                      <Text strong style={{ color: CalculationUtils.getProfitColor(product.totalProfit) }}>
-                        {CalculationUtils.formatCurrency(product.totalProfit)}
-                      </Text>
-                    </Space>
-                  </Col>
-                  <Col xs={24} sm={8}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Margin</Text>
-                      <Progress 
-                        percent={Math.min(100, Math.max(0, product.profitMargin))} 
-                        size="small" 
-                        format={percent => `${(percent || 0).toFixed(1)}%`}
-                        status={product.profitMargin >= 20 ? 'success' : product.profitMargin >= 10 ? 'normal' : 'exception'}
-                        style={{ minWidth: 80 }}
-                      />
-                    </Space>
-                  </Col>
-                </Row>
-              }
-            />
-          </List.Item>
-        )}
-      />
-    ) : (
-      <Empty description="No product sales data available" />
-    )}
-  </Card>
-);
-
-// Enhanced Cashier Performance Component
-const CashierPerformance = ({ transactions, cashiers, loading, selectedShop, shops }) => {
-  const cashierPerformance = useMemo(() => {
-    let filteredTransactions = transactions;
-    if (selectedShop && selectedShop !== 'all') {
-      filteredTransactions = transactions.filter(transaction => {
-        const transactionShopId = transaction.shopId || transaction.shop;
-        return transactionShopId === selectedShop;
-      });
-    }
-
-    const performance = {};
-    
-    filteredTransactions.forEach(transaction => {
-      const cashierName = transaction.cashierName || 'Unknown Cashier';
-      if (!performance[cashierName]) {
-        performance[cashierName] = {
-          name: cashierName,
-          revenue: 0,
-          transactions: 0,
-          profit: 0,
-          itemsSold: 0,
-          creditSales: 0,
-          creditAmount: 0
-        };
-      }
-      performance[cashierName].revenue += transaction.totalAmount || 0;
-      performance[cashierName].profit += transaction.profit || 0;
-      performance[cashierName].transactions += 1;
-      performance[cashierName].itemsSold += transaction.itemsCount || 0;
-      
-      if (transaction.paymentMethod === 'credit') {
-        performance[cashierName].creditSales += 1;
-        performance[cashierName].creditAmount += transaction.totalAmount || 0;
-      }
-    });
-    
-    return Object.values(performance)
-      .map(cashier => ({
-        ...cashier,
-        averageTransaction: cashier.transactions > 0 ? cashier.revenue / cashier.transactions : 0,
-        profitMargin: cashier.revenue > 0 ? (cashier.profit / cashier.revenue) * 100 : 0,
-        creditRatio: cashier.revenue > 0 ? (cashier.creditAmount / cashier.revenue) * 100 : 0
-      }))
-      .sort((a, b) => b.revenue - a.revenue);
-  }, [transactions, selectedShop]);
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <TeamOutlined />
-          Cashier Performance
-          <Badge count={cashierPerformance.length} showZero color="#1890ff" />
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">
-          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Text>
-      </div>
-      
-      {cashierPerformance.length > 0 ? (
-        <List
-          dataSource={cashierPerformance}
-          renderItem={(cashier, index) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Avatar 
-                    style={{ 
-                      backgroundColor: index < 3 ? '#52c41a' : '#d9d9d9',
-                      color: index < 3 ? '#fff' : '#000'
-                    }}
-                  >
-                    {cashier.name?.charAt(0)?.toUpperCase() || 'C'}
-                  </Avatar>
-                }
-                title={
-                  <Space>
-                    <Text strong>{cashier.name}</Text>
-                    {index < 3 && <Tag color="green">Top Performer</Tag>}
-                    {cashier.creditSales > 0 && (
-                      <Tag color="orange">{cashier.creditSales} credit sales</Tag>
-                    )}
-                  </Space>
-                }
-                description={
-                  <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
-                        <Text strong style={{ color: '#1890ff' }}>
-                          {CalculationUtils.formatCurrency(cashier.revenue)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Transactions</Text>
-                        <Text strong>{cashier.transactions}</Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Avg. Transaction</Text>
-                        <Text strong>
-                          {CalculationUtils.formatCurrency(cashier.averageTransaction)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
-                        <Progress 
-                          percent={Math.min(100, Math.max(0, cashier.profitMargin))} 
-                          size="small" 
-                          format={percent => `${(percent || 0).toFixed(1)}%`}
-                          status={cashier.profitMargin >= 20 ? 'success' : cashier.profitMargin >= 10 ? 'normal' : 'exception'}
-                        />
-                      </Space>
-                    </Col>
-                  </Row>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No cashier performance data available" />
-      )}
-    </Card>
-  );
-};
-
-// Enhanced Shop Performance Component
-const ShopPerformance = ({ transactions, shops, loading }) => {
-  const shopPerformance = useMemo(() => {
-    return CalculationUtils.calculateShopPerformance(transactions, shops);
-  }, [transactions, shops]);
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <ShopOutlined />
-          Shop Performance Comparison
-          <Badge count={shopPerformance.length} showZero color="#1890ff" />
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      {shopPerformance.length > 0 ? (
-        <List
-          dataSource={shopPerformance}
-          renderItem={(shop, index) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Avatar 
-                    style={{ 
-                      backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
-                      color: index < 3 ? '#fff' : '#000'
-                    }}
-                  >
-                    {shop.name?.charAt(0)?.toUpperCase() || 'S'}
-                  </Avatar>
-                }
-                title={
-                  <Space>
-                    <Text strong>{shop.name}</Text>
-                    {index < 3 && <Tag color="gold">Top Performer</Tag>}
-                    <Tag color={shop.performance.color}>{shop.performance.label}</Tag>
-                  </Space>
-                }
-                description={
-                  <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
-                        <Text strong style={{ color: '#1890ff' }}>
-                          {CalculationUtils.formatCurrency(shop.revenue)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Transactions</Text>
-                        <Text strong>{shop.transactions}</Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Profit</Text>
-                        <Text strong style={{ color: CalculationUtils.getProfitColor(shop.profit) }}>
-                          {CalculationUtils.formatCurrency(shop.profit)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Margin</Text>
-                        <Progress 
-                          percent={Math.min(100, Math.max(0, shop.profitMargin))} 
-                          size="small" 
-                          format={percent => `${(percent || 0).toFixed(1)}%`}
-                          status={shop.profitMargin >= 20 ? 'success' : shop.profitMargin >= 10 ? 'normal' : 'exception'}
-                        />
-                      </Space>
-                    </Col>
-                  </Row>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No shop performance data available" />
-      )}
-    </Card>
-  );
-};
-
-// Enhanced Export Report Modal
+// UPDATED: Export Report Modal
 const ExportReportModal = ({ visible, onCancel, data, filters, loading, selectedShop, shops }) => {
   const [exporting, setExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState('csv');
-  const [includeCharts, setIncludeCharts] = useState(false);
 
   const handleExport = async () => {
     setExporting(true);
@@ -1449,19 +1392,6 @@ const ExportReportModal = ({ visible, onCancel, data, filters, loading, selected
               <Option value="json">JSON (Structured Data)</Option>
             </Select>
           </Form.Item>
-          
-          <Form.Item label="Additional Options">
-            <Space direction="vertical">
-              <Switch 
-                checked={includeCharts} 
-                onChange={setIncludeCharts}
-                disabled={exportFormat === 'csv'}
-              />
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                Include chart data (JSON only)
-              </Text>
-            </Space>
-          </Form.Item>
         </Form>
         
         <Divider />
@@ -1483,7 +1413,7 @@ const ExportReportModal = ({ visible, onCancel, data, filters, loading, selected
   );
 };
 
-// Enhanced Transaction Details Modal
+// Transaction Details Modal
 const TransactionDetailsModal = ({ transaction, visible, onCancel, shops }) => {
   if (!transaction) return null;
 
@@ -1565,12 +1495,9 @@ const TransactionDetailsModal = ({ transaction, visible, onCancel, shops }) => {
           </Text>
         </Descriptions.Item>
         <Descriptions.Item label="Profit Margin">
-          <Progress 
-            percent={Math.min(100, Math.max(0, transaction.profitMargin || 0))} 
-            size="small" 
-            format={percent => `${(percent || 0).toFixed(1)}%`}
-            status={transaction.profitMargin >= 0 ? 'normal' : 'exception'}
-          />
+          <Text strong style={{ color: '#3f8600' }}>
+            {transaction.profitMargin?.toFixed(1)}%
+          </Text>
         </Descriptions.Item>
       </Descriptions>
 
@@ -1608,7 +1535,7 @@ const TransactionDetailsModal = ({ transaction, visible, onCancel, shops }) => {
                     </Col>
                     <Col span={6}>
                       <Text type="secondary">Margin: </Text>
-                      <Text>{item.profitMargin?.toFixed(1)}%</Text>
+                      <Text style={{ color: '#3f8600' }}>{item.profitMargin?.toFixed(1)}%</Text>
                     </Col>
                   </Row>
                 }
@@ -1623,7 +1550,7 @@ const TransactionDetailsModal = ({ transaction, visible, onCancel, shops }) => {
   );
 };
 
-// Enhanced Settings Panel
+// Report Settings Component
 const ReportSettings = ({ settings, onSettingsChange }) => {
   const [visible, setVisible] = useState(false);
 
@@ -1793,7 +1720,7 @@ const PaymentModeFilter = ({ value, onChange }) => {
 };
 
 // =============================================
-// MAIN TRANSACTIONS REPORT COMPONENT
+// UPDATED MAIN TRANSACTIONS REPORT COMPONENT
 // =============================================
 
 const TransactionsReport = ({ currentUser }) => {
@@ -1805,9 +1732,9 @@ const TransactionsReport = ({ currentUser }) => {
   const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchText, setSearchText] = useState('');
-  const [dateRange, setDateRange] = useState(null); // Start with null to indicate no filter
+  const [dateRange, setDateRange] = useState(null);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
-  const [timeRangeFilter, setTimeRangeFilter] = useState('yearly'); // Default to yearly
+  const [timeRangeFilter, setTimeRangeFilter] = useState('yearly');
   const [selectedShop, setSelectedShop] = useState('all');
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [viewModalVisible, setViewModalVisible] = useState(false);
@@ -1846,11 +1773,11 @@ const TransactionsReport = ({ currentUser }) => {
         startDate = now.startOf('year');
         break;
       case 'all':
-        return null; // No date filter for "all time"
+        return null;
       case 'custom':
-        return dateRange; // Keep existing custom range
+        return dateRange;
       default:
-        startDate = now.startOf('year'); // Default to yearly
+        startDate = now.startOf('year');
     }
 
     return [startDate, now];
@@ -1861,8 +1788,13 @@ const TransactionsReport = ({ currentUser }) => {
     const newDateRange = calculateDateRange(timeRangeFilter);
     setDateRange(newDateRange);
   }, [timeRangeFilter, calculateDateRange]);
+
+  // Auto-fetch data when filters change
+  useEffect(() => {
+    fetchAllData();
+  }, [selectedShop, timeRangeFilter, paymentMethodFilter]);
+
   const fetchAllData = useCallback(async () => {
-    // Prevent multiple simultaneous requests
     if (loading) {
       console.log('⏳ Skipping fetch - already loading');
       return;
@@ -1898,7 +1830,7 @@ const TransactionsReport = ({ currentUser }) => {
   
       console.log('📋 Fetch parameters:', params);
   
-      // OPTIMIZED: Use the comprehensive data endpoint
+      // Use the comprehensive data endpoint
       let comprehensiveData;
       try {
         console.log('🔄 Fetching comprehensive transaction data...');
@@ -1911,7 +1843,17 @@ const TransactionsReport = ({ currentUser }) => {
       } catch (error) {
         console.error('❌ Comprehensive data error:', error);
         // Fallback to individual API calls
-        comprehensiveData = await fetchDataWithFallback(params);
+        const [transactionsData, expensesData, productsData] = await Promise.all([
+          safeApiCall(() => transactionAPI.getAll(params), []),
+          safeApiCall(() => expenseAPI.getAll(params), []),
+          safeApiCall(() => productAPI.getAll(), [])
+        ]);
+        
+        comprehensiveData = {
+          transactions: transactionsData,
+          expenses: expensesData,
+          products: productsData
+        };
       }
   
       // Get additional data in parallel
@@ -1946,7 +1888,6 @@ const TransactionsReport = ({ currentUser }) => {
   
       // Calculate additional stats
       const topProducts = CalculationUtils.calculateTopProducts(salesWithProfit, 10, selectedShop);
-      const revenueTrends = CalculationUtils.calculateRevenueTrends(salesWithProfit, 'day', 7, selectedShop);
       const shopPerformance = CalculationUtils.calculateShopPerformance(salesWithProfit, shopsData);
   
       // Update stats
@@ -1956,7 +1897,6 @@ const TransactionsReport = ({ currentUser }) => {
         totalShops: shopsData.length,
         totalCashiers: cashiersData.length,
         topProducts,
-        revenueTrends,
         shopPerformance,
         credits: creditsData,
         timestamp: new Date().toISOString()
@@ -1995,23 +1935,6 @@ const TransactionsReport = ({ currentUser }) => {
       console.error('API call failed:', error);
       return fallback;
     }
-  };
-  
-  // Fallback data fetching method
-  const fetchDataWithFallback = async (params) => {
-    console.log('🔄 Using fallback data fetching method');
-    
-    const [transactionsData, expensesData, productsData] = await Promise.all([
-      safeApiCall(() => transactionAPI.getAll(params), []),
-      safeApiCall(() => expenseAPI.getAll(params), []),
-      safeApiCall(() => productAPI.getAll(), [])
-    ]);
-  
-    return {
-      transactions: transactionsData,
-      expenses: expensesData,
-      products: productsData
-    };
   };
 
   // Event handlers
@@ -2053,7 +1976,7 @@ const TransactionsReport = ({ currentUser }) => {
     message.info('Filters cleared - showing yearly data');
   }, []);
 
-  // Utility functions aligned with Admin Dashboard
+  // Utility functions
   const getPaymentMethodColor = useCallback((method) => {
     const colors = {
       cash: 'orange',
@@ -2107,7 +2030,7 @@ const TransactionsReport = ({ currentUser }) => {
     });
   }, [transactions, searchText]);
 
-  // Table columns with enhanced financial data and credit information
+  // UPDATED: Table columns with simplified profit calculations
   const columns = useMemo(() => [
     {
       title: 'Transaction ID',
@@ -2207,13 +2130,9 @@ const TransactionsReport = ({ currentUser }) => {
       dataIndex: 'profitMargin',
       key: 'profitMargin',
       render: (margin) => (
-        <Progress 
-          percent={Math.min(100, Math.max(0, margin || 0))} 
-          size="small" 
-          format={percent => `${(percent || 0).toFixed(1)}%`}
-          status={margin >= 0 ? 'normal' : 'exception'}
-          showInfo={true}
-        />
+        <Text strong style={{ color: '#3f8600' }}>
+          {margin?.toFixed(1)}%
+        </Text>
       ),
       width: 100
     },
@@ -2295,7 +2214,7 @@ const TransactionsReport = ({ currentUser }) => {
     shops
   ]);
 
-  // Enhanced Overview Tab with Credit Analysis
+  // UPDATED: Enhanced Overview Tab with new arrangement (Shop -> Cashier -> Product)
   const renderOverviewTab = () => (
     <div>
       <FinancialOverview 
@@ -2305,34 +2224,12 @@ const TransactionsReport = ({ currentUser }) => {
         shops={shops}
       />
       
-      {/* Credit Analysis Section */}
-      <CreditAnalysis
-        credits={stats.credits}
-        stats={stats}
-        loading={loading}
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
-      <RevenueTrendChart 
-        data={stats.revenueTrends} 
-        stats={stats} 
-        loading={loading} 
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
-      <TopProductsAnalysis 
-        topProducts={stats.topProducts || []} 
-        loading={loading} 
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
+      {/* UPDATED: Arranged from top to bottom as specified */}
       <ShopPerformance 
         transactions={transactions} 
         shops={shops} 
-        loading={loading} 
+        loading={loading}
+        selectedShop={selectedShop}
       />
       
       <CashierPerformance 
@@ -2342,10 +2239,25 @@ const TransactionsReport = ({ currentUser }) => {
         selectedShop={selectedShop}
         shops={shops}
       />
+      
+      <ProductPerformance 
+        topProducts={stats.topProducts || []} 
+        loading={loading} 
+        selectedShop={selectedShop}
+        shops={shops}
+      />
+      
+      <CreditAnalysis
+        credits={stats.credits}
+        stats={stats}
+        loading={loading}
+        selectedShop={selectedShop}
+        shops={shops}
+      />
     </div>
   );
 
-  // Main render without AdminLayout wrapper
+  // Main render
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>

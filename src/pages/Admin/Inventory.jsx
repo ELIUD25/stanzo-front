@@ -31,13 +31,14 @@ import {
   EyeOutlined,
   EditOutlined
 } from '@ant-design/icons';
-import { productAPI, handleApiError } from '../../services/api';
+import { productAPI, handleApiError, shopAPI } from '../../services/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
 
 const Inventory = () => {
   const [inventory, setInventory] = useState([]);
+  const [shops, setShops] = useState([]); // Added shops state
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState(null);
@@ -94,6 +95,25 @@ const Inventory = () => {
     return response;
   }, []);
 
+  // Fetch shops data
+  const fetchShops = useCallback(async () => {
+    try {
+      console.log('🔄 Fetching shops data...');
+      const response = await shopAPI.getAll();
+      const shopsData = handleApiResponse(response, 'shops');
+      
+      if (shopsData && Array.isArray(shopsData)) {
+        console.log('✅ Shops loaded:', shopsData.length);
+        setShops(shopsData);
+      } else {
+        console.warn('⚠️ No shops data found or invalid format');
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch shops:', error);
+      // Don't set error for shops fetch to avoid blocking inventory display
+    }
+  }, [handleApiResponse]);
+
   // Calculate statistics from inventory data
   const calculateStats = useCallback((inventoryData) => {
     if (!inventoryData || !Array.isArray(inventoryData)) {
@@ -121,6 +141,27 @@ const Inventory = () => {
     
     console.log('📊 Inventory stats calculated:', { totalProducts, lowStockCount, outOfStockCount, totalInventoryValue });
   }, []);
+
+  // Get shop name from product - Enhanced version
+  const getShopName = useCallback((product) => {
+    if (!product) return 'Unknown Shop';
+    
+    // If shop is already an object with name
+    if (product.shop && typeof product.shop === 'object') {
+      return product.shop.name || product.shop.shopName || 'Unknown Shop';
+    } 
+    // If shop is an ID, look it up in shops array
+    else if (product.shop && shops.length > 0) {
+      const foundShop = shops.find(shop => shop._id === product.shop);
+      return foundShop?.name || 'Unknown Shop';
+    }
+    // If no shop data available
+    else if (product.shop) {
+      return product.shop; // Return as-is if it's a string
+    }
+    
+    return 'Unknown Shop';
+  }, [shops]);
 
   // Fetch inventory data from products API
   const fetchInventory = useCallback(async () => {
@@ -169,9 +210,15 @@ const Inventory = () => {
     }
   }, [calculateStats, handleApiResponse]);
 
+  // Fetch both inventory and shops on component mount
   useEffect(() => {
-    fetchInventory();
-  }, [fetchInventory]);
+    const fetchData = async () => {
+      await fetchShops();
+      await fetchInventory();
+    };
+    
+    fetchData();
+  }, [fetchInventory, fetchShops]);
 
   // Handle stock update
   const handleStockUpdate = async (values) => {
@@ -323,20 +370,7 @@ const Inventory = () => {
     }
   };
 
-  // Get shop name from product
-  const getShopName = (product) => {
-    if (!product) return 'Unknown Shop';
-    
-    if (product.shop && typeof product.shop === 'object') {
-      return product.shop.name || product.shop.shopName || 'Unknown Shop';
-    } else if (product.shop) {
-      return product.shop;
-    }
-    
-    return 'Unknown Shop';
-  };
-
-  // Filter inventory based on search text
+  // Filter inventory based on search text - Enhanced to include shop name search
   const filteredInventory = inventory.filter(item =>
     item.name?.toLowerCase().includes(searchText.toLowerCase()) ||
     item.category?.toLowerCase().includes(searchText.toLowerCase()) ||
