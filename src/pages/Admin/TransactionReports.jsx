@@ -588,12 +588,13 @@ const CalculationUtils = {
     return parseFloat(((revenueScore * 0.4) + (transactionScore * 0.2) + (marginScore * 0.2) + (efficiencyScore * 0.2)).toFixed(1));
   },
 
+  // UPDATED: Remove 'poor' reference from performance tiers
   getPerformanceTier: (score) => {
     if (score >= 90) return { tier: 'excellent', color: '#52c41a', label: 'Excellent' };
     if (score >= 75) return { tier: 'good', color: '#1890ff', label: 'Good' };
     if (score >= 60) return { tier: 'average', color: '#faad14', label: 'Average' };
     if (score >= 40) return { tier: 'needs_improvement', color: '#fa8c16', label: 'Needs Improvement' };
-    return { tier: 'poor', color: '#cf1322', label: 'Poor' };
+    return { tier: 'underperforming', color: '#cf1322', label: 'Underperforming' };
   },
 
   calculateRevenueTrends: (transactionsData, period = 'day', days = 7, selectedShopId = null) => {
@@ -680,7 +681,7 @@ const CalculationUtils = {
 };
 
 // =============================================
-// UPDATED COMPONENTS (REMOVED REVENUE TRENDS, REARRANGED ORDER)
+// UPDATED COMPONENTS (REARRANGED ORDER AS SPECIFIED)
 // =============================================
 
 // Shop Filter Component
@@ -830,7 +831,128 @@ const FinancialOverview = ({ stats, loading, selectedShop, shops }) => {
   );
 };
 
-// UPDATED: Shop Performance Component (Now shows at the top as in images)
+// Credit Analysis Component (Now at the top)
+const CreditAnalysis = ({ credits, stats, loading, selectedShop, shops }) => {
+  const creditMetrics = [
+    {
+      title: 'Total Credit Sales',
+      value: stats.totalCreditAmount || 0,
+      prefix: 'KES',
+      color: '#faad14',
+      icon: <CreditCardOutlined />,
+      description: 'Total sales on credit'
+    },
+    {
+      title: 'Outstanding Credit',
+      value: stats.outstandingCredit || 0,
+      prefix: 'KES',
+      color: '#cf1322',
+      icon: <DollarOutlined />,
+      description: 'Unpaid credit balance'
+    },
+    {
+      title: 'Credit Sales Count',
+      value: stats.creditSalesCount || 0,
+      color: '#722ed1',
+      icon: <ShoppingCartOutlined />,
+      description: 'Number of credit transactions'
+    },
+    {
+      title: 'Credit Ratio',
+      value: stats.totalRevenue > 0 ? ((stats.totalCreditAmount || 0) / stats.totalRevenue * 100) : 0,
+      suffix: '%',
+      color: '#1890ff',
+      description: 'Credit sales vs total revenue'
+    }
+  ];
+
+  return (
+    <Card 
+      title={
+        <Space>
+          <CreditCardOutlined />
+          Credit Analysis
+          <Badge count={stats.creditSalesCount || 0} showZero color="orange" />
+        </Space>
+      } 
+      style={{ marginBottom: 24 }}
+      loading={loading}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">
+          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
+        </Text>
+      </div>
+
+      <Row gutter={[16, 16]}>
+        {creditMetrics.map((metric, index) => (
+          <Col xs={24} sm={12} md={8} lg={6} key={index}>
+            <Card 
+              loading={loading}
+              hoverable
+              style={{ transition: 'all 0.3s ease' }}
+            >
+              <Statistic
+                title={
+                  <Space>
+                    <Tooltip title={metric.description}>
+                      <span style={{ cursor: 'help' }}>{metric.title}</span>
+                    </Tooltip>
+                  </Space>
+                }
+                value={metric.value}
+                prefix={metric.prefix}
+                suffix={metric.suffix}
+                precision={2}
+                valueStyle={{ color: metric.color }}
+                formatter={value => (
+                  <span style={{ color: metric.color }}>
+                    {typeof value === 'number' ? value.toLocaleString('en-KE', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    }) : value}
+                  </span>
+                )}
+              />
+              <div style={{ marginTop: 8, fontSize: '12px', color: '#999' }}>
+                {metric.description}
+              </div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+
+      {credits && credits.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Text strong>Recent Credit Transactions:</Text>
+          <List
+            size="small"
+            dataSource={credits.slice(0, 5)}
+            renderItem={credit => (
+              <List.Item>
+                <List.Item.Meta
+                  avatar={<Avatar icon={<CreditCardOutlined />} />}
+                  title={credit.customerName || 'Unknown Customer'}
+                  description={
+                    <Space>
+                      <Text>Amount: {CalculationUtils.formatCurrency(credit.totalAmount)}</Text>
+                      <Text>Balance: {CalculationUtils.formatCurrency(credit.balanceDue)}</Text>
+                      <Tag color={credit.status === 'paid' ? 'green' : 'orange'}>
+                        {credit.status?.toUpperCase()}
+                      </Tag>
+                    </Space>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        </div>
+      )}
+    </Card>
+  );
+};
+
+// UPDATED: Shop Performance Component (Now shows second as specified)
 const ShopPerformance = ({ transactions, shops, loading, selectedShop }) => {
   const shopPerformance = useMemo(() => {
     return CalculationUtils.calculateShopPerformance(transactions, shops);
@@ -924,7 +1046,7 @@ const ShopPerformance = ({ transactions, shops, loading, selectedShop }) => {
   );
 };
 
-// UPDATED: Cashier Performance Component (Now shows second as in images)
+// UPDATED: Cashier Performance Component (Now shows third as specified)
 const CashierPerformance = ({ transactions, cashiers, loading, selectedShop, shops }) => {
   const cashierPerformance = useMemo(() => {
     let filteredTransactions = transactions;
@@ -1062,7 +1184,7 @@ const CashierPerformance = ({ transactions, cashiers, loading, selectedShop, sho
   );
 };
 
-// UPDATED: Product Performance Component (Now shows third as in images)
+// UPDATED: Product Performance Component (Now shows at the bottom as specified)
 const ProductPerformance = ({ topProducts, loading, selectedShop, shops }) => (
   <Card 
     title={
@@ -1160,128 +1282,9 @@ const ProductPerformance = ({ topProducts, loading, selectedShop, shops }) => (
   </Card>
 );
 
-// Credit Analysis Component
-const CreditAnalysis = ({ credits, stats, loading, selectedShop, shops }) => {
-  const creditMetrics = [
-    {
-      title: 'Total Credit Sales',
-      value: stats.totalCreditAmount || 0,
-      prefix: 'KES',
-      color: '#faad14',
-      icon: <CreditCardOutlined />,
-      description: 'Total sales on credit'
-    },
-    {
-      title: 'Outstanding Credit',
-      value: stats.outstandingCredit || 0,
-      prefix: 'KES',
-      color: '#cf1322',
-      icon: <DollarOutlined />,
-      description: 'Unpaid credit balance'
-    },
-    {
-      title: 'Credit Sales Count',
-      value: stats.creditSalesCount || 0,
-      color: '#722ed1',
-      icon: <ShoppingCartOutlined />,
-      description: 'Number of credit transactions'
-    },
-    {
-      title: 'Credit Ratio',
-      value: stats.totalRevenue > 0 ? ((stats.totalCreditAmount || 0) / stats.totalRevenue * 100) : 0,
-      suffix: '%',
-      color: '#1890ff',
-      description: 'Credit sales vs total revenue'
-    }
-  ];
+// ... (Rest of the components remain the same: ExportReportModal, TransactionDetailsModal, ReportSettings, SearchHelp, TimeRangeFilter, PaymentModeFilter)
 
-  return (
-    <Card 
-      title={
-        <Space>
-          <CreditCardOutlined />
-          Credit Analysis
-          <Badge count={stats.creditSalesCount || 0} showZero color="orange" />
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">
-          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Text>
-      </div>
-
-      <Row gutter={[16, 16]}>
-        {creditMetrics.map((metric, index) => (
-          <Col xs={24} sm={12} md={8} lg={6} key={index}>
-            <Card 
-              loading={loading}
-              hoverable
-              style={{ transition: 'all 0.3s ease' }}
-            >
-              <Statistic
-                title={
-                  <Space>
-                    <Tooltip title={metric.description}>
-                      <span style={{ cursor: 'help' }}>{metric.title}</span>
-                    </Tooltip>
-                  </Space>
-                }
-                value={metric.value}
-                prefix={metric.prefix}
-                suffix={metric.suffix}
-                precision={2}
-                valueStyle={{ color: metric.color }}
-                formatter={value => (
-                  <span style={{ color: metric.color }}>
-                    {typeof value === 'number' ? value.toLocaleString('en-KE', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    }) : value}
-                  </span>
-                )}
-              />
-              <div style={{ marginTop: 8, fontSize: '12px', color: '#999' }}>
-                {metric.description}
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      {credits && credits.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <Text strong>Recent Credit Transactions:</Text>
-          <List
-            size="small"
-            dataSource={credits.slice(0, 5)}
-            renderItem={credit => (
-              <List.Item>
-                <List.Item.Meta
-                  avatar={<Avatar icon={<CreditCardOutlined />} />}
-                  title={credit.customerName || 'Unknown Customer'}
-                  description={
-                    <Space>
-                      <Text>Amount: {CalculationUtils.formatCurrency(credit.totalAmount)}</Text>
-                      <Text>Balance: {CalculationUtils.formatCurrency(credit.balanceDue)}</Text>
-                      <Tag color={credit.status === 'paid' ? 'green' : 'orange'}>
-                        {credit.status?.toUpperCase()}
-                      </Tag>
-                    </Space>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        </div>
-      )}
-    </Card>
-  );
-};
-
-// UPDATED: Export Report Modal
+// Export Report Modal
 const ExportReportModal = ({ visible, onCancel, data, filters, loading, selectedShop, shops }) => {
   const [exporting, setExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState('csv');
@@ -2214,7 +2217,7 @@ const TransactionsReport = ({ currentUser }) => {
     shops
   ]);
 
-  // UPDATED: Enhanced Overview Tab with new arrangement (Shop -> Cashier -> Product)
+  // UPDATED: Enhanced Overview Tab with new arrangement (Credit -> Shop -> Cashier -> Product)
   const renderOverviewTab = () => (
     <div>
       <FinancialOverview 
@@ -2225,6 +2228,14 @@ const TransactionsReport = ({ currentUser }) => {
       />
       
       {/* UPDATED: Arranged from top to bottom as specified */}
+      <CreditAnalysis
+        credits={stats.credits}
+        stats={stats}
+        loading={loading}
+        selectedShop={selectedShop}
+        shops={shops}
+      />
+      
       <ShopPerformance 
         transactions={transactions} 
         shops={shops} 
@@ -2243,14 +2254,6 @@ const TransactionsReport = ({ currentUser }) => {
       <ProductPerformance 
         topProducts={stats.topProducts || []} 
         loading={loading} 
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
-      <CreditAnalysis
-        credits={stats.credits}
-        stats={stats}
-        loading={loading}
         selectedShop={selectedShop}
         shops={shops}
       />

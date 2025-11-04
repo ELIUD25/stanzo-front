@@ -1,11 +1,11 @@
-// src/pages/Cashier/CashierDashboard.jsx - FULLY UPDATED
+// src/pages/Cashier/CashierDashboard.jsx - COMPLETE UPDATED VERSION
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Layout, Card, Row, Col, Statistic, Typography, Tag,
-  Space, Button, Table, DatePicker, Spin, Alert,
-  Divider, List, Avatar, Tabs, Input, Select, Badge,
-  Modal, Form, InputNumber, Tooltip, Popconfirm, QRCode,
-  FloatButton, notification, Empty, message, Descriptions
+  Space, Button, Spin, Alert, Divider, List, Avatar, 
+  Tabs, Input, Modal, Form, InputNumber, Tooltip, 
+  FloatButton, notification, Empty, message, Descriptions,
+  Progress, Badge, Timeline, DatePicker, Table
 } from 'antd';
 import {
   ShopOutlined, UserOutlined, DollarOutlined,
@@ -14,34 +14,31 @@ import {
   SearchOutlined, PlusOutlined, BarcodeOutlined,
   CalculatorOutlined, DeleteOutlined, ScanOutlined,
   PrinterOutlined, SafetyCertificateOutlined, QrcodeOutlined,
-  ClearOutlined, ExclamationCircleOutlined, HistoryOutlined,
-  ShoppingOutlined, TeamOutlined, CreditCardOutlined,
-  PhoneOutlined, CalendarOutlined, BankOutlined,
-  MoneyCollectOutlined, LineChartOutlined, PieChartOutlined
+  ClearOutlined, CreditCardOutlined, PhoneOutlined,
+  CalendarOutlined, BankOutlined, MoneyCollectOutlined,
+  HistoryOutlined, WarningOutlined, CheckCircleOutlined,
+  ClockCircleOutlined, TeamOutlined, ShoppingOutlined,
+  EyeOutlined, FileTextOutlined, InfoCircleOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { authAPI, transactionAPI, productAPI, shopAPI, creditAPI } from '../../services/api';
+import { authAPI, transactionAPI, productAPI, creditAPI } from '../../services/api';
 import Cart from './Cart';
 import ReceiptTemplate from '../../components/ReceiptTemplate';
 import dayjs from 'dayjs';
 
 const { Header, Content } = Layout;
 const { Title, Text } = Typography;
-const { RangePicker } = DatePicker;
 const { TabPane } = Tabs;
-const { Option } = Select;
 const { Search } = Input;
 
-// Enhanced Calculation Utilities for Cashier Dashboard
+// Enhanced Calculation Utilities
 const CashierCalculationUtils = {
-  // Safe number handling
   safeNumber: (value, fallback = 0) => {
     if (value === null || value === undefined || value === '') return fallback;
     const num = Number(value);
     return isNaN(num) ? fallback : num;
   },
 
-  // Currency formatting
   formatCurrency: (amount) => {
     const value = CashierCalculationUtils.safeNumber(amount);
     return `KES ${value.toLocaleString('en-KE', { 
@@ -50,7 +47,6 @@ const CashierCalculationUtils = {
     })}`;
   },
 
-  // Calculate cart totals
   calculateCartTotals: (cart) => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -61,200 +57,10 @@ const CashierCalculationUtils = {
       grandTotal: subtotal,
       averageItemPrice: totalItems > 0 ? subtotal / totalItems : 0
     };
-  },
-
-  // Enhanced sales analysis
-  analyzeDailySales: (transactions, cashierId, shopId, dateRange) => {
-    if (!transactions || !Array.isArray(transactions)) {
-      return getDefaultCashierStats();
-    }
-
-    // Filter transactions for this cashier and shop
-    const filteredTransactions = transactions.filter(transaction => {
-      const matchesCashier = transaction.cashierId === cashierId || transaction.cashierName === cashierId;
-      const matchesShop = transaction.shop === shopId || transaction.shopId === shopId;
-      const matchesDateRange = !dateRange || (
-        dayjs(transaction.saleDate).isAfter(dateRange[0]) && 
-        dayjs(transaction.saleDate).isBefore(dateRange[1])
-      );
-      
-      return matchesCashier && matchesShop && matchesDateRange;
-    });
-
-    // Calculate comprehensive statistics
-    const totalSales = filteredTransactions.reduce((sum, t) => sum + CashierCalculationUtils.safeNumber(t.totalAmount), 0);
-    const totalTransactions = filteredTransactions.length;
-    const totalItems = filteredTransactions.reduce((sum, t) => sum + CashierCalculationUtils.safeNumber(t.itemsCount), 0);
-    const averageTransaction = totalTransactions > 0 ? totalSales / totalTransactions : 0;
-
-    // Payment method analysis
-    const paymentMethodBreakdown = {
-      cash: 0,
-      bank_mpesa: 0,
-      credit: 0,
-      cash_bank_mpesa: 0
-    };
-
-    let cashAmount = 0;
-    let bankMpesaAmount = 0;
-    let creditAmount = 0;
-    let cashierItemsSold = 0;
-
-    filteredTransactions.forEach(transaction => {
-      const method = transaction.paymentMethod?.toLowerCase() || 'cash';
-      const amount = transaction.totalAmount || 0;
-      const itemsCount = transaction.itemsCount || 0;
-      
-      cashierItemsSold += itemsCount;
-      
-      if (paymentMethodBreakdown.hasOwnProperty(method)) {
-        paymentMethodBreakdown[method] += amount;
-      } else {
-        paymentMethodBreakdown.cash += amount;
-      }
-
-      // Enhanced money classification
-      if (method === 'cash') {
-        cashAmount += amount;
-      } else if (method === 'cash_bank_mpesa') {
-        cashAmount += transaction.cashAmount || 0;
-        bankMpesaAmount += transaction.bankMpesaAmount || (amount - (transaction.cashAmount || 0));
-      } else if (method === 'credit') {
-        creditAmount += transaction.amountPaid || amount;
-      } else {
-        bankMpesaAmount += amount;
-      }
-    });
-
-    // Performance metrics
-    const performanceMetrics = {
-      salesEfficiency: totalTransactions > 0 ? totalSales / totalTransactions : 0,
-      itemsPerTransaction: totalTransactions > 0 ? totalItems / totalTransactions : 0,
-      revenuePerItem: totalItems > 0 ? totalSales / totalItems : 0
-    };
-
-    // Time-based analysis
-    const hourlyAnalysis = CashierCalculationUtils.analyzeHourlySales(filteredTransactions);
-    const peakHours = CashierCalculationUtils.findPeakHours(hourlyAnalysis);
-
-    return {
-      // Basic metrics
-      totalSales,
-      totalTransactions,
-      totalItems,
-      averageTransaction,
-      
-      // Money collection
-      cashAmount,
-      bankMpesaAmount,
-      creditAmount,
-      cashierItemsSold,
-      
-      // Payment breakdown
-      paymentMethodBreakdown,
-      
-      // Performance metrics
-      performanceMetrics,
-      
-      // Time analysis
-      hourlyAnalysis,
-      peakHours,
-      
-      // Additional insights
-      lastTransactionTime: filteredTransactions.length > 0 
-        ? filteredTransactions.reduce((latest, current) => 
-            new Date(current.saleDate || current.createdAt) > new Date(latest.saleDate || latest.createdAt) ? current : latest
-          ).saleDate
-        : null,
-      
-      timestamp: new Date().toISOString()
-    };
-  },
-
-  // Analyze sales by hour
-  analyzeHourlySales: (transactions) => {
-    const hourlyData = {};
-    
-    for (let hour = 0; hour < 24; hour++) {
-      hourlyData[hour] = {
-        hour,
-        sales: 0,
-        transactions: 0,
-        items: 0
-      };
-    }
-
-    transactions.forEach(transaction => {
-      const hour = dayjs(transaction.saleDate).hour();
-      hourlyData[hour].sales += transaction.totalAmount || 0;
-      hourlyData[hour].transactions += 1;
-      hourlyData[hour].items += transaction.itemsCount || 0;
-    });
-
-    return Object.values(hourlyData);
-  },
-
-  // Find peak performance hours
-  findPeakHours: (hourlyAnalysis) => {
-    if (!hourlyAnalysis.length) return [];
-    
-    const sortedBySales = [...hourlyAnalysis].sort((a, b) => b.sales - a.sales);
-    return sortedBySales.slice(0, 3).map(hour => ({
-      hour: hour.hour,
-      sales: hour.sales,
-      period: `${hour.hour}:00 - ${hour.hour + 1}:00`
-    }));
-  },
-
-  // Product performance analysis for cashier
-  analyzeProductPerformance: (transactions, cashierId) => {
-    const productSales = {};
-    
-    transactions.forEach(transaction => {
-      if (transaction.cashierId !== cashierId && transaction.cashierName !== cashierId) return;
-      
-      transaction.items?.forEach(item => {
-        const productId = item.productId || item.productName;
-        if (!productSales[productId]) {
-          productSales[productId] = {
-            productId,
-            productName: item.productName,
-            quantity: 0,
-            revenue: 0,
-            transactions: 0
-          };
-        }
-        
-        productSales[productId].quantity += item.quantity || 1;
-        productSales[productId].revenue += item.totalPrice || 0;
-        productSales[productId].transactions += 1;
-      });
-    });
-
-    return Object.values(productSales)
-      .map(product => ({
-        ...product,
-        averageQuantity: product.transactions > 0 ? product.quantity / product.transactions : 0,
-        revenuePerUnit: product.quantity > 0 ? product.revenue / product.quantity : 0
-      }))
-      .sort((a, b) => b.revenue - a.revenue);
-  },
-
-  // Credit sales analysis
-  analyzeCreditSales: (credits, cashierId) => {
-    if (!credits || !Array.isArray(credits)) return [];
-    
-    return credits
-      .filter(credit => credit.cashierId === cashierId || credit.cashierName === cashierId)
-      .map(credit => ({
-        ...credit,
-        daysUntilDue: credit.dueDate ? dayjs(credit.dueDate).diff(dayjs(), 'day') : null,
-        isOverdue: credit.dueDate ? dayjs(credit.dueDate).isBefore(dayjs()) && credit.balanceDue > 0 : false
-      }));
   }
 };
 
-// Default stats for initialization
+// Default stats
 const getDefaultCashierStats = () => ({
   totalSales: 0,
   totalTransactions: 0,
@@ -264,21 +70,8 @@ const getDefaultCashierStats = () => ({
   bankMpesaAmount: 0,
   creditAmount: 0,
   cashierItemsSold: 0,
-  paymentMethodBreakdown: {
-    cash: 0,
-    bank_mpesa: 0,
-    credit: 0,
-    cash_bank_mpesa: 0
-  },
-  performanceMetrics: {
-    salesEfficiency: 0,
-    itemsPerTransaction: 0,
-    revenuePerItem: 0
-  },
-  hourlyAnalysis: [],
-  peakHours: [],
-  productPerformance: [],
-  creditAnalysis: []
+  creditTransactions: 0,
+  creditGivenToday: 0
 });
 
 const CashierDashboard = () => {
@@ -287,17 +80,14 @@ const CashierDashboard = () => {
   const [selectedShop, setSelectedShop] = useState(null);
   const [activeTab, setActiveTab] = useState('pos');
 
-  // Enhanced Dashboard States with Analysis
+  // Dashboard States
   const [dailyStats, setDailyStats] = useState(getDefaultCashierStats());
-  const [transactions, setTransactions] = useState([]);
+  const [todayTransactions, setTodayTransactions] = useState([]);
+  const [todayCredits, setTodayCredits] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(false);
-  const [dateRange, setDateRange] = useState([
-    dayjs().startOf('day'),
-    dayjs().endOf('day')
-  ]);
 
-  // Enhanced POS States
+  // POS States
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -305,8 +95,7 @@ const CashierDashboard = () => {
   const [posLoading, setPosLoading] = useState({
     products: false,
     checkout: false,
-    stats: false,
-    analysis: false
+    stats: false
   });
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [categories, setCategories] = useState([]);
@@ -315,421 +104,36 @@ const CashierDashboard = () => {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [scanMode, setScanMode] = useState(false);
   const [lowStockProducts, setLowStockProducts] = useState([]);
-  const [availableShops, setAvailableShops] = useState([]);
 
-  // Enhanced Payment Modal States
+  // Payment Modal States
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
   const [paymentForm] = Form.useForm();
   const [creditForm] = Form.useForm();
-
-  // Enhanced Cash/Bank-Mpesa Payment State
   const [cashBankMpesaSplit, setCashBankMpesaSplit] = useState({
     cashAmount: 0,
     bankMpesaAmount: 0,
     totalAmount: 0
   });
-
-  // Enhanced Credit Payment State
   const [creditPaymentData, setCreditPaymentData] = useState({
     amountPaid: 0,
     balance: 0,
     customerName: '',
     customerPhone: '',
-    dueDate: null
+    dueDate: null,
+    shopName: '',
+    shopId: ''
   });
 
-  // Enhanced Analysis States
-  const [productPerformance, setProductPerformance] = useState([]);
-  const [hourlyAnalysis, setHourlyAnalysis] = useState([]);
-  const [creditAnalysis, setCreditAnalysis] = useState([]);
-  const [performanceMetrics, setPerformanceMetrics] = useState({
-    salesEfficiency: 0,
-    itemsPerTransaction: 0,
-    revenuePerItem: 0
-  });
+  // Calculate credit percentage
+  const creditPercentage = useMemo(() => 
+    dailyStats.totalSales > 0 
+      ? (dailyStats.creditAmount / dailyStats.totalSales) * 100 
+      : 0, 
+    [dailyStats.totalSales, dailyStats.creditAmount]
+  );
 
-  // Company information
-  const companyInfo = useMemo(() => ({
-    name: "STANZO SHOP",
-    address: "Mikinduri, Kenya",
-    phone: "+254 746919850",
-    email: "stanzokinyua5967@gmail.com",
-    slogan: "Quality Products, Best Prices"
-  }), []);
-
-  // Initialize dashboard
-  useEffect(() => {
-    const initializeDashboard = () => {
-      const cashierData = JSON.parse(localStorage.getItem('cashierData'));
-      
-      if (!cashierData) {
-        navigate('/cashier/login');
-        return;
-      }
-      
-      setCashier(cashierData);
-      
-      // Get selected shop from localStorage
-      if (cashierData.lastShop) {
-        setSelectedShop({
-          _id: cashierData.lastShop,
-          name: cashierData.shopName || 'Selected Shop'
-        });
-      } else {
-        navigate('/cashier/shops');
-        return;
-      }
-      
-      setDashboardLoading(false);
-    };
-
-    initializeDashboard();
-  }, [navigate]);
-
-  // Validate shop and cashier data
-  const validateShopAndCashier = useCallback(() => {
-    if (!selectedShop || !selectedShop._id) {
-      console.error('❌ Shop data is invalid:', selectedShop);
-      message.error('Please select a shop to continue.');
-      return false;
-    }
-    
-    if (!cashier || !cashier._id) {
-      console.error('❌ Cashier data is invalid:', cashier);
-      message.error('Cashier information is missing. Please log in again.');
-      return false;
-    }
-    
-    return true;
-  }, [selectedShop, cashier]);
-
-  // Fetch available shops for cashier
-  const fetchAvailableShops = useCallback(async () => {
-    try {
-      const response = await shopAPI.getAll();
-      const shopsData = response.data || response;
-      setAvailableShops(Array.isArray(shopsData) ? shopsData : []);
-    } catch (error) {
-      console.error('Error fetching shops:', error);
-      message.error('Failed to load shops');
-    }
-  }, []);
-
-  // ENHANCED: Fetch and analyze cashier's detailed daily sales stats
-  const fetchCashierDailyStats = useCallback(async () => {
-    if (!cashier?._id || !selectedShop?._id) return;
-
-    setPosLoading(prev => ({ ...prev, stats: true }));
-    
-    try {
-      const today = dayjs().startOf('day').toISOString();
-      const now = dayjs().toISOString();
-      
-      // Try to get stats from backend aggregation first
-      const backendStats = await transactionAPI.getCashierDailyStats({
-        cashierId: cashier._id,
-        shopId: selectedShop._id,
-        startDate: today,
-        endDate: now
-      });
-      
-      if (backendStats && backendStats.todaySales !== undefined) {
-        // Use backend calculated stats
-        console.log('✅ Using backend aggregated cashier stats');
-        setDailyStats(backendStats);
-      } else {
-        // Enhanced frontend calculation with analysis
-        console.log('🔄 Using enhanced frontend calculation for cashier stats');
-        
-        const response = await transactionAPI.getAll({
-          cashierId: cashier._id,
-          shopId: selectedShop._id,
-          startDate: today,
-          endDate: now,
-          status: 'completed'
-        });
-        
-        const transactions = Array.isArray(response) ? response : [];
-        
-        // Enhanced analysis using calculation utilities
-        const analyzedStats = CashierCalculationUtils.analyzeDailySales(
-          transactions, 
-          cashier._id, 
-          selectedShop._id, 
-          [dayjs(today), dayjs(now)]
-        );
-
-        setDailyStats(analyzedStats);
-        
-        // Additional analysis
-        const productPerformance = CashierCalculationUtils.analyzeProductPerformance(transactions, cashier._id);
-        setProductPerformance(productPerformance);
-        
-        setPerformanceMetrics(analyzedStats.performanceMetrics);
-        setHourlyAnalysis(analyzedStats.hourlyAnalysis);
-      }
-
-    } catch (error) {
-      console.error('❌ Error fetching cashier daily stats:', error);
-    } finally {
-      setPosLoading(prev => ({ ...prev, stats: false }));
-    }
-  }, [cashier, selectedShop]);
-
-  // ENHANCED: Fetch and analyze daily sales for dashboard
-  const fetchDailySales = async () => {
-    if (!cashier?._id || !selectedShop?._id) return;
-    
-    setStatsLoading(true);
-    try {
-      const [startDate, endDate] = dateRange;
-      
-      // Try to get stats from backend aggregation first
-      const backendStats = await transactionAPI.getDailySalesStats({
-        cashierId: cashier._id,
-        shopId: selectedShop._id,
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString()
-      });
-      
-      if (backendStats && backendStats.totalSales !== undefined) {
-        // Use backend calculated stats
-        console.log('✅ Using backend aggregated daily sales stats');
-        setDailyStats(backendStats);
-        
-        // Fetch transactions for enhanced analysis
-        const response = await transactionAPI.getAll({
-          cashierId: cashier._id,
-          shopId: selectedShop._id,
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          status: 'completed'
-        });
-        
-        const transactionsData = Array.isArray(response) ? response : [];
-        setTransactions(transactionsData);
-        
-        // Perform enhanced analysis
-        performEnhancedAnalysis(transactionsData);
-      } else {
-        // Enhanced frontend calculation with analysis
-        console.log('🔄 Using enhanced frontend calculation for daily sales');
-        
-        const response = await transactionAPI.getAll({
-          cashierId: cashier._id,
-          shopId: selectedShop._id,
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          status: 'completed'
-        });
-        
-        const transactionsData = Array.isArray(response) ? response : [];
-        setTransactions(transactionsData);
-        
-        // Enhanced analysis
-        const analyzedStats = CashierCalculationUtils.analyzeDailySales(
-          transactionsData, 
-          cashier._id, 
-          selectedShop._id, 
-          dateRange
-        );
-        
-        setDailyStats(analyzedStats);
-        performEnhancedAnalysis(transactionsData);
-      }
-    } catch (error) {
-      console.error('Error fetching daily sales:', error);
-    } finally {
-      setStatsLoading(false);
-    }
-  };
-
-  // NEW: Perform enhanced analysis on transactions data
-  const performEnhancedAnalysis = (transactionsData) => {
-    if (!transactionsData.length) return;
-    
-    // Product performance analysis
-    const productPerformance = CashierCalculationUtils.analyzeProductPerformance(transactionsData, cashier._id);
-    setProductPerformance(productPerformance);
-    
-    // Hourly analysis
-    const hourlyAnalysis = CashierCalculationUtils.analyzeHourlySales(transactionsData);
-    setHourlyAnalysis(hourlyAnalysis);
-    
-    // Performance metrics
-    const totalSales = transactionsData.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
-    const totalTransactions = transactionsData.length;
-    const totalItems = transactionsData.reduce((sum, t) => sum + (t.itemsCount || 0), 0);
-    
-    setPerformanceMetrics({
-      salesEfficiency: totalTransactions > 0 ? totalSales / totalTransactions : 0,
-      itemsPerTransaction: totalTransactions > 0 ? totalItems / totalTransactions : 0,
-      revenuePerItem: totalItems > 0 ? totalSales / totalItems : 0
-    });
-    
-    // Fetch and analyze credit data
-    fetchCreditAnalysis();
-  };
-
-  // NEW: Fetch and analyze credit data
-  const fetchCreditAnalysis = async () => {
-    try {
-      const creditsData = await creditAPI.getAll({
-        cashierId: cashier._id,
-        shopId: selectedShop._id
-      });
-      
-      const analyzedCredits = CashierCalculationUtils.analyzeCreditSales(creditsData, cashier._id);
-      setCreditAnalysis(analyzedCredits);
-    } catch (error) {
-      console.error('Error fetching credit analysis:', error);
-    }
-  };
-
-  // Fetch products for POS
-  const fetchProducts = async (showMessage = false) => {
-    if (!validateShopAndCashier()) return;
-    
-    setPosLoading(prev => ({ ...prev, products: true }));
-    
-    try {
-      console.log('🛍️ Fetching products for shop:', selectedShop._id);
-      const response = await productAPI.getAll();
-      const productsData = response.data || response;
-      
-      const shopProducts = Array.isArray(productsData) 
-        ? productsData.filter(product => {
-            const productShopId = product.shop?._id || product.shop || product.shopId;
-            return productShopId === selectedShop._id && product.isActive !== false;
-          })
-        : [];
-
-      setProducts(shopProducts);
-      
-      // Extract unique categories
-      const uniqueCategories = [...new Set(shopProducts
-        .map(p => p.category)
-        .filter(Boolean)
-        .sort()
-      )];
-      setCategories(uniqueCategories);
-
-      // Enhanced low stock analysis
-      const lowStock = shopProducts.filter(product => 
-        product.currentStock > 0 && product.currentStock <= (product.minStockLevel || 5)
-      );
-      setLowStockProducts(lowStock);
-
-      if (showMessage) {
-        if (shopProducts.length === 0) {
-          message.warning(`No products found for ${selectedShop?.name}. Please add products first.`);
-        } else {
-          message.success(`Loaded ${shopProducts.length} products for ${selectedShop?.name}`);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error fetching products:', error);
-      notification.error({
-        message: 'Failed to Load Products',
-        description: 'Please check your connection and try again.',
-        duration: 3,
-      });
-    } finally {
-      setPosLoading(prev => ({ ...prev, products: false }));
-    }
-  };
-
-  // Filter products for POS
-  const filteredProductsMemo = useMemo(() => {
-    let filtered = products;
-
-    if (searchTerm) {
-      filtered = filtered.filter(product =>
-        product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.barcode?.includes(searchTerm) ||
-        product.category?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    if (selectedCategory !== 'all') {
-      filtered = filtered.filter(product => product.category === selectedCategory);
-    }
-
-    return filtered;
-  }, [products, searchTerm, selectedCategory]);
-
-  // Update filtered products when memo changes
-  useEffect(() => {
-    setFilteredProducts(filteredProductsMemo);
-  }, [filteredProductsMemo]);
-
-  // Enhanced cart calculations
-  const totals = useMemo(() => {
-    return CashierCalculationUtils.calculateCartTotals(cart);
-  }, [cart]);
-
-  // Enhanced Payment Method Selection
-  const handlePaymentMethodSelect = (method) => {
-    setSelectedPaymentMethod(method);
-    
-    if (method === 'cash_bank_mpesa') {
-      setCashBankMpesaSplit({
-        cashAmount: 0,
-        bankMpesaAmount: 0,
-        totalAmount: totals.subtotal
-      });
-      paymentForm.setFieldsValue({
-        cashAmount: 0,
-        bankMpesaAmount: 0
-      });
-    } else if (method === 'credit') {
-      setCreditPaymentData({
-        amountPaid: 0,
-        balance: totals.subtotal,
-        customerName: '',
-        customerPhone: '',
-        dueDate: dayjs().add(7, 'day')
-      });
-      creditForm.setFieldsValue({
-        amountPaid: 0,
-        balance: totals.subtotal,
-        customerName: '',
-        customerPhone: '',
-        dueDate: dayjs().add(7, 'day')
-      });
-    }
-    
-    setPaymentModalVisible(true);
-  };
-
-  // Enhanced Cash/Bank-Mpesa Split Changes
-  const handleCashBankMpesaChange = (changedValues, allValues) => {
-    const cashAmount = parseFloat(allValues.cashAmount || 0);
-    const bankMpesaAmount = parseFloat(allValues.bankMpesaAmount || 0);
-    const total = cashAmount + bankMpesaAmount;
-    
-    setCashBankMpesaSplit({
-      cashAmount,
-      bankMpesaAmount,
-      totalAmount: total
-    });
-  };
-
-  // Enhanced Credit Payment Changes
-  const handleCreditPaymentChange = (changedValues, allValues) => {
-    const amountPaid = parseFloat(allValues.amountPaid || 0);
-    const totalAmount = totals.subtotal;
-    const balance = totalAmount - amountPaid;
-    
-    setCreditPaymentData(prev => ({
-      ...prev,
-      amountPaid,
-      balance: Math.max(0, balance)
-    }));
-  };
-
-  // Enhanced Payment Validation
+  // ADD THE MISSING VALIDATION FUNCTIONS
   const validateCashBankMpesaPayment = () => {
     const { cashAmount, bankMpesaAmount, totalAmount } = cashBankMpesaSplit;
     
@@ -765,6 +169,11 @@ const CashierDashboard = () => {
         return false;
       }
       
+      if (!values.shopName || !values.shopId) {
+        message.error('Shop information is required for credit transactions');
+        return false;
+      }
+      
       return true;
     } catch (error) {
       message.error('Please fill all required fields correctly');
@@ -772,241 +181,253 @@ const CashierDashboard = () => {
     }
   };
 
-  // Enhanced Process Payment
-  const processPayment = async () => {
-    if (selectedPaymentMethod === 'cash_bank_mpesa') {
-      if (!validateCashBankMpesaPayment()) return;
-      
-      await handleCheckout('cash_bank_mpesa', {
-        cashAmount: cashBankMpesaSplit.cashAmount,
-        bankMpesaAmount: cashBankMpesaSplit.bankMpesaAmount
-      });
-      
-    } else if (selectedPaymentMethod === 'credit') {
-      if (!await validateCreditPayment()) return;
-      
-      const values = creditForm.getFieldsValue();
-      
-      await handleCheckout('credit', {
-        amountPaid: values.amountPaid,
-        balance: values.balance,
-        customerName: values.customerName,
-        customerPhone: values.customerPhone,
-        dueDate: values.dueDate
-      });
-      
-    } else {
-      await handleCheckout(selectedPaymentMethod);
-    }
+  // ADD CASH/BANK-MPESA SPLIT HANDLER
+  const handleCashBankMpesaChange = (changedValues, allValues) => {
+    const cashAmount = parseFloat(allValues.cashAmount || 0);
+    const bankMpesaAmount = parseFloat(allValues.bankMpesaAmount || 0);
+    const total = cashAmount + bankMpesaAmount;
     
-    setPaymentModalVisible(false);
-    setSelectedPaymentMethod(null);
-  };
-
-  // Enhanced Checkout with Analysis
-  const handleCheckout = async (paymentMethod, paymentDetails = {}) => {
-    if (!validateShopAndCashier()) return;
-
-    if (cart.length === 0) {
-      Modal.error({
-        title: 'Empty Cart',
-        content: 'Please add items to cart before checkout.',
-      });
-      return;
-    }
-
-    // Enhanced stock validation
-    const stockValidation = cart.every(item => {
-      const product = products.find(p => p._id === item.productId);
-      return product && (product.currentStock || 0) >= item.quantity;
+    setCashBankMpesaSplit({
+      cashAmount,
+      bankMpesaAmount,
+      totalAmount: total
     });
+  };
 
-    if (!stockValidation) {
-      Modal.error({
-        title: 'Stock Issue',
-        content: 'Some products in your cart are no longer available in sufficient quantity. Please refresh and try again.',
-      });
-      await fetchProducts();
-      return;
-    }
-
-    setPosLoading(prev => ({ ...prev, checkout: true }));
+  // ADD CREDIT PAYMENT CHANGE HANDLER
+  const handleCreditPaymentChange = (changedValues, allValues) => {
+    const amountPaid = parseFloat(allValues.amountPaid || 0);
+    const totalAmount = totals.subtotal;
+    const balance = totalAmount - amountPaid;
     
-    try {
-      const generateTransactionNumber = () => {
-        const timestamp = Date.now().toString(36);
-        const random = Math.random().toString(36).substring(2, 8);
-        return `TXN-${timestamp}-${random}`.toUpperCase();
-      };
+    setCreditPaymentData(prev => ({
+      ...prev,
+      amountPaid,
+      balance: Math.max(0, balance),
+      shopName: allValues.shopName || prev.shopName,
+      shopId: allValues.shopId || prev.shopId
+    }));
+  };
 
-      // Enhanced transaction data
-      const transactionData = {
-        shop: selectedShop._id,
-        shopName: selectedShop.name,
-        cashierId: cashier._id,
-        cashierName: cashier.name || 'Cashier',
-        customerName: paymentDetails.customerName?.trim() || 'Walk-in Customer',
-        customerPhone: paymentDetails.customerPhone || '',
-        transactionNumber: generateTransactionNumber(),
-        items: cart.map(item => ({
-          productId: item.productId,
-          productName: item.name,
-          quantity: Number(item.quantity),
-          price: Number(item.price),
-          totalPrice: Number(item.price * item.quantity),
-          barcode: item.barcode
-        })),
-        totalAmount: Number(totals.subtotal),
-        paymentMethod: paymentMethod,
-        status: 'completed',
-        itemsCount: Number(totals.totalItems),
-        saleDate: new Date().toISOString(),
-        receiptNumber: `RCP-${Date.now()}`
-      };
+  // Company information
+  const companyInfo = useMemo(() => ({
+    name: "STANZO SHOP",
+    address: "Mikinduri, Kenya",
+    phone: "+254 746919850",
+    email: "stanzokinyua5967@gmail.com",
+    slogan: "Quality Products, Best Prices"
+  }), []);
 
-      // Enhanced payment data
-      if (paymentMethod === 'cash_bank_mpesa') {
-        transactionData.cashAmount = paymentDetails.cashAmount;
-        transactionData.bankMpesaAmount = paymentDetails.bankMpesaAmount;
-        transactionData.paymentSplit = {
-          cash: paymentDetails.cashAmount,
-          bank_mpesa: paymentDetails.bankMpesaAmount
-        };
-      } else if (paymentMethod === 'credit') {
-        transactionData.amountPaid = paymentDetails.amountPaid;
-        transactionData.balanceDue = paymentDetails.balance;
-        transactionData.dueDate = paymentDetails.dueDate;
-        transactionData.creditStatus = paymentDetails.balance > 0 ? 'pending' : 'paid';
-        transactionData.status = paymentDetails.balance > 0 ? 'credit' : 'completed';
-      }
+  // Cart calculations
+  const totals = useMemo(() => {
+    return CashierCalculationUtils.calculateCartTotals(cart);
+  }, [cart]);
 
-      console.log('💰 Sending enhanced transaction data:', transactionData);
-
-      // Update product stock
-      await updateProductStock(cart);
-
-      // Create transaction
-      const response = await transactionAPI.create(transactionData);
-      const transactionResult = response?.data || response;
+  // Initialize dashboard
+  useEffect(() => {
+    const initializeDashboard = () => {
+      const cashierData = JSON.parse(localStorage.getItem('cashierData'));
       
-      if (transactionResult && transactionResult._id) {
-        // Enhanced credit record creation
-        if (paymentMethod === 'credit' && paymentDetails.balance > 0) {
-          try {
-            const creditRecord = {
-              transactionId: transactionResult._id,
-              customerName: paymentDetails.customerName,
-              customerPhone: paymentDetails.customerPhone,
-              totalAmount: totals.subtotal,
-              amountPaid: paymentDetails.amountPaid,
-              balanceDue: paymentDetails.balance,
-              dueDate: paymentDetails.dueDate,
-              shopId: selectedShop._id,
-              cashierId: cashier._id,
-              cashierName: cashier.name,
-              status: 'pending'
-            };
-            
-            await creditAPI.create(creditRecord);
-            console.log('✅ Enhanced credit record created');
-          } catch (creditError) {
-            console.error('❌ Error creating credit record:', creditError);
-          }
-        }
-        
-        setCurrentTransaction(transactionResult);
-        setShowReceipt(true);
-        
-        // Enhanced stats update
-        await fetchCashierDailyStats();
-        await fetchDailySales();
-        
-        notification.success({
-          message: 'Transaction Completed',
-          description: `Sale completed successfully for ${selectedShop?.name}. Total: KES ${totals.subtotal.toLocaleString()}`,
-          duration: 3,
+      if (!cashierData) {
+        navigate('/cashier/login');
+        return;
+      }
+      
+      setCashier(cashierData);
+      
+      // Get selected shop from localStorage
+      if (cashierData.lastShop) {
+        setSelectedShop({
+          _id: cashierData.lastShop,
+          name: cashierData.shopName || 'Selected Shop'
         });
-
-        setCart([]);
-        
       } else {
-        throw new Error('Transaction failed: Invalid response from server');
-      }
-    } catch (error) {
-      console.error('❌ Enhanced checkout error:', error);
-      
-      let errorMessage = 'Failed to process transaction. Please try again.';
-      
-      if (error.message.includes('stock')) {
-        errorMessage = `Stock error: ${error.message}`;
-      } else if (error.message.includes('network') || error.message.includes('Network')) {
-        errorMessage = 'Network error. Please check your connection.';
+        navigate('/cashier/shops');
+        return;
       }
       
-      notification.error({
-        message: 'Checkout Failed',
-        description: errorMessage,
-        duration: 5,
-      });
+      setDashboardLoading(false);
+    };
 
-      await fetchProducts();
-    } finally {
-      setPosLoading(prev => ({ ...prev, checkout: false }));
+    initializeDashboard();
+  }, [navigate]);
+
+  // Validate shop and cashier data
+  const validateShopAndCashier = useCallback(() => {
+    if (!selectedShop || !selectedShop._id) {
+      message.error('Please select a shop to continue.');
+      return false;
     }
-  };
+    
+    if (!cashier || !cashier._id) {
+      message.error('Cashier information is missing. Please log in again.');
+      return false;
+    }
+    
+    return true;
+  }, [selectedShop, cashier]);
 
-  // Enhanced Product Stock Update
-  const updateProductStock = async (cartItems) => {
-    console.log('🔄 Starting enhanced stock update for cart items:', cartItems);
+  // Fetch cashier daily stats with credit integration
+  const fetchCashierDailyStats = useCallback(async () => {
+    if (!cashier?._id || !selectedShop?._id) return;
+
+    setPosLoading(prev => ({ ...prev, stats: true }));
     
     try {
-      setProducts(prevProducts => 
-        prevProducts.map(product => {
-          const cartItem = cartItems.find(item => item.productId === product._id);
-          if (cartItem) {
-            const newStock = Math.max(0, (product.currentStock || 0) - cartItem.quantity);
-            console.log(`📦 Updating ${product.name} stock locally: ${product.currentStock} -> ${newStock}`);
-            return { ...product, currentStock: newStock };
-          }
-          return product;
-        })
-      );
+      console.log('📊 Fetching enhanced cashier daily stats...');
 
-      const updatePromises = cartItems.map(async (cartItem) => {
-        try {
-          const product = products.find(p => p._id === cartItem.productId);
-          if (product) {
-            const newStock = Math.max(0, (product.currentStock || 0) - cartItem.quantity);
-            
-            await productAPI.update(product._id, {
-              currentStock: newStock,
-              lastStockUpdate: new Date().toISOString()
-            });
-            
-            console.log(`✅ Stock updated via API for ${product.name}: ${newStock}`);
-          }
-        } catch (error) {
-          console.error(`❌ Failed to update stock for product ${cartItem.productId}:`, error);
-          throw error;
-        }
+      const analysisData = await transactionAPI.getCashierDailyAnalysis(
+        cashier._id, 
+        selectedShop._id, 
+        dayjs().toISOString()
+      );
+      
+      if (analysisData.success && analysisData.data) {
+        setDailyStats(analysisData.data);
+      } else {
+        await fetchDailySalesFallback();
+      }
+
+    } catch (error) {
+      console.error('❌ Error fetching enhanced cashier daily stats:', error);
+      await fetchDailySalesFallback();
+    } finally {
+      setPosLoading(prev => ({ ...prev, stats: false }));
+    }
+  }, [cashier, selectedShop]);
+
+  // Fetch today's transactions and credits
+  const fetchTodayTransactions = useCallback(async () => {
+    if (!cashier?._id || !selectedShop?._id) return;
+
+    try {
+      console.log('📊 Fetching today\'s transactions and credits...');
+      
+      const today = dayjs().startOf('day').toISOString();
+      const now = dayjs().toISOString();
+
+      // Fetch today's transactions
+      const transactionsResponse = await transactionAPI.getAll({
+        cashierId: cashier._id,
+        shopId: selectedShop._id,
+        startDate: today,
+        endDate: now,
+        status: 'completed'
       });
 
-      await Promise.all(updatePromises);
+      const transactions = Array.isArray(transactionsResponse) ? transactionsResponse : [];
+      setTodayTransactions(transactions);
 
-      setLowStockProducts(prev => 
-        prev.filter(product => 
-          product.currentStock > 0 && product.currentStock <= (product.minStockLevel || 5)
-        )
-      );
+      // Fetch today's credits
+      const creditsResponse = await creditAPI.getAll({
+        cashierId: cashier._id,
+        shopId: selectedShop._id,
+        startDate: today,
+        endDate: now
+      });
 
-      console.log('✅ Enhanced product stock update completed');
+      const creditsData = Array.isArray(creditsResponse?.data) ? creditsResponse.data : [];
+      setTodayCredits(creditsData);
+
     } catch (error) {
-      console.error('❌ Error in enhanced stock update:', error);
-      throw new Error('Failed to update product stock. Please try again.');
+      console.error('❌ Error fetching today\'s data:', error);
+      setTodayTransactions([]);
+      setTodayCredits([]);
+    }
+  }, [cashier, selectedShop]);
+
+  // Fallback function for basic stats calculation
+  const fetchDailySalesFallback = async () => {
+    try {
+      const today = dayjs().startOf('day').toISOString();
+      const now = dayjs().toISOString();
+      
+      const response = await transactionAPI.getAll({
+        cashierId: cashier._id,
+        shopId: selectedShop._id,
+        startDate: today,
+        endDate: now,
+        status: 'completed'
+      });
+      
+      const transactions = Array.isArray(response) ? response : [];
+      
+      // Calculate basic stats
+      const totalSales = transactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+      const totalTransactions = transactions.length;
+      const creditAmount = transactions
+        .filter(t => t.paymentMethod === 'credit')
+        .reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+      const creditTransactions = transactions.filter(t => t.paymentMethod === 'credit').length;
+
+      setDailyStats({
+        totalSales,
+        totalTransactions,
+        creditAmount,
+        creditTransactions,
+        cashAmount: totalSales - creditAmount,
+        bankMpesaAmount: 0,
+        cashierItemsSold: transactions.reduce((sum, t) => 
+          sum + (t.items?.reduce((itemSum, item) => itemSum + (item.quantity || 0), 0) || 0), 0
+        )
+      });
+      
+    } catch (fallbackError) {
+      console.error('❌ Fallback calculation failed:', fallbackError);
+      setDailyStats(getDefaultCashierStats());
     }
   };
 
-  // Enhanced POS Functions
+  // Fetch products for POS
+  const fetchProducts = async (showMessage = false) => {
+    if (!validateShopAndCashier()) return;
+    
+    setPosLoading(prev => ({ ...prev, products: true }));
+    
+    try {
+      const response = await productAPI.getAll();
+      const productsData = response.data || response;
+      
+      const shopProducts = Array.isArray(productsData) 
+        ? productsData.filter(product => {
+            const productShopId = product.shop?._id || product.shop || product.shopId;
+            return productShopId === selectedShop._id && product.isActive !== false;
+          })
+        : [];
+
+      setProducts(shopProducts);
+      setFilteredProducts(shopProducts);
+      
+      // Extract unique categories
+      const uniqueCategories = [...new Set(shopProducts
+        .map(p => p.category)
+        .filter(Boolean)
+        .sort()
+      )];
+      setCategories(uniqueCategories);
+
+      // Low stock analysis
+      const lowStock = shopProducts.filter(product => 
+        product.currentStock > 0 && product.currentStock <= (product.minStockLevel || 5)
+      );
+      setLowStockProducts(lowStock);
+
+      if (showMessage && shopProducts.length === 0) {
+        message.warning(`No products found for ${selectedShop?.name}. Please add products first.`);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching products:', error);
+      notification.error({
+        message: 'Failed to Load Products',
+        description: 'Please check your connection and try again.',
+        duration: 3,
+      });
+    } finally {
+      setPosLoading(prev => ({ ...prev, products: false }));
+    }
+  };
+
+  // Enhanced cart functions
   const addToCart = (product, quantity = 1, customPrice = null) => {
     if (!product._id) {
       console.error('❌ Cannot add product to cart: product ID is missing', product);
@@ -1068,48 +489,6 @@ const CashierDashboard = () => {
       setBarcodeInput('');
     }
   };
-
-  const updateCartItemPrice = (productId, newPrice) => {
-    const product = products.find(p => p._id === productId);
-    if (!product) return;
-
-    const originalPrice = product.minSellingPrice || product.sellingPrice || 0;
-    
-    if (newPrice < originalPrice) {
-      message.error(`New price (KES ${newPrice}) cannot be lower than original price (KES ${originalPrice})`);
-      return;
-    }
-
-    if (newPrice <= 0) {
-      message.error('Price must be greater than 0');
-      return;
-    }
-
-    setCart(prevCart =>
-      prevCart.map(item =>
-        item.productId === productId
-          ? { ...item, price: newPrice }
-          : item
-      )
-    );
-
-    message.success('Price updated successfully');
-  };
-
-  const handleBarcodeScan = useCallback(() => {
-    if (!barcodeInput.trim()) return;
-
-    const product = products.find(p => 
-      p.barcode && p.barcode.toString() === barcodeInput.toString().trim()
-    );
-
-    if (product) {
-      addToCart(product, 1);
-      message.success(`Scanned: ${product.name}`);
-    } else {
-      message.error('Product not found with this barcode');
-    }
-  }, [barcodeInput, products]);
 
   const updateCartItem = (productId, quantity) => {
     if (quantity <= 0) {
@@ -1192,15 +571,6 @@ const CashierDashboard = () => {
     return CashierCalculationUtils.formatCurrency(amount);
   };
 
-  const handleShopChange = (shopId) => {
-    const newShop = availableShops.find(shop => shop._id === shopId);
-    if (newShop) {
-      setSelectedShop(newShop);
-      setCart([]);
-      message.success(`Switched to ${newShop.name}`);
-    }
-  };
-
   const handleLogout = () => {
     authAPI.logout();
     navigate('/cashier/login');
@@ -1210,208 +580,656 @@ const CashierDashboard = () => {
     navigate('/cashier/shops');
   };
 
-  // ENHANCED: Dashboard columns with analysis
-  const dashboardColumns = [
-    {
-      title: 'Transaction ID',
-      dataIndex: 'transactionNumber',
-      key: 'transactionNumber',
-      render: (text) => <Text code>{text}</Text>
-    },
-    {
-      title: 'Shop',
-      dataIndex: 'shopName',
-      key: 'shopName',
-      render: (shopName, record) => (
-        <Tag color="blue" icon={<ShopOutlined />}>
-          {shopName || record.shop?.name || selectedShop?.name || 'Unknown Shop'}
-        </Tag>
-      )
-    },
-    {
-      title: 'Time',
-      dataIndex: 'saleDate',
-      key: 'saleDate',
-      render: (date) => dayjs(date).format('HH:mm:ss')
-    },
-    {
-      title: 'Items',
-      dataIndex: 'itemsCount',
-      key: 'itemsCount',
-      align: 'center'
-    },
-    {
-      title: 'Total Amount',
-      dataIndex: 'totalAmount',
-      key: 'totalAmount',
-      render: (amount) => formatCurrency(amount)
-    },
-    {
-      title: 'Payment Method',
-      dataIndex: 'paymentMethod',
-      key: 'paymentMethod',
-      render: (method) => {
-        const methodColors = {
-          cash: 'green',
-          bank_mpesa: 'blue',
-          cash_bank_mpesa: 'purple',
-          credit: 'red'
-        };
-        
-        const methodLabels = {
-          cash: 'CASH',
-          bank_mpesa: 'BANK/MPESA',
-          cash_bank_mpesa: 'CASH/BANK/MPESA',
-          credit: 'CREDIT'
-        };
-        
-        return (
-          <Tag color={methodColors[method] || 'default'}>
-            {methodLabels[method] || method?.toUpperCase() || 'CASH'}
-          </Tag>
-        );
-      }
+  // Payment method selection and processing
+  const handlePaymentMethodSelect = (method) => {
+    setSelectedPaymentMethod(method);
+    
+    if (method === 'cash_bank_mpesa') {
+      setCashBankMpesaSplit({
+        cashAmount: 0,
+        bankMpesaAmount: 0,
+        totalAmount: totals.subtotal
+      });
+      paymentForm.setFieldsValue({
+        cashAmount: 0,
+        bankMpesaAmount: 0
+      });
+    } else if (method === 'credit') {
+      setCreditPaymentData({
+        amountPaid: 0,
+        balance: totals.subtotal,
+        customerName: '',
+        customerPhone: '',
+        dueDate: dayjs().add(7, 'day'),
+        shopName: selectedShop?.name || '',
+        shopId: selectedShop?._id || ''
+      });
+      creditForm.setFieldsValue({
+        amountPaid: 0,
+        balance: totals.subtotal,
+        customerName: '',
+        customerPhone: '',
+        dueDate: dayjs().add(7, 'day'),
+        shopName: selectedShop?.name || '',
+        shopId: selectedShop?._id || ''
+      });
     }
-  ];
+    
+    setPaymentModalVisible(true);
+  };
 
-  // NEW: Enhanced Analysis Components
-  const PerformanceMetricsCard = () => (
-    <Card 
-      title="Performance Metrics" 
-      style={{ marginBottom: 16 }}
-      loading={posLoading.stats}
-    >
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={8}>
-          <Statistic
-            title="Sales Efficiency"
-            value={performanceMetrics.salesEfficiency}
-            precision={2}
-            prefix="KES"
-            valueStyle={{ color: '#1890ff' }}
-            suffix="per transaction"
-          />
-        </Col>
-        <Col xs={24} sm={8}>
-          <Statistic
-            title="Items/Transaction"
-            value={performanceMetrics.itemsPerTransaction}
-            precision={1}
-            valueStyle={{ color: '#52c41a' }}
-          />
-        </Col>
-        <Col xs={24} sm={8}>
-          <Statistic
-            title="Revenue Per Item"
-            value={performanceMetrics.revenuePerItem}
-            precision={2}
-            prefix="KES"
-            valueStyle={{ color: '#722ed1' }}
-          />
-        </Col>
-      </Row>
-    </Card>
-  );
+  // Process Payment
+  const processPayment = async () => {
+    if (selectedPaymentMethod === 'cash_bank_mpesa') {
+      if (!validateCashBankMpesaPayment()) return;
+      
+      await handleCheckout('cash_bank_mpesa', {
+        cashAmount: cashBankMpesaSplit.cashAmount,
+        bankMpesaAmount: cashBankMpesaSplit.bankMpesaAmount
+      });
+      
+    } else if (selectedPaymentMethod === 'credit') {
+      if (!await validateCreditPayment()) return;
+      
+      const values = creditForm.getFieldsValue();
+      
+      await handleCheckout('credit', {
+        amountPaid: values.amountPaid,
+        balance: values.balance,
+        customerName: values.customerName,
+        customerPhone: values.customerPhone,
+        dueDate: values.dueDate,
+        shopName: values.shopName,
+        shopId: values.shopId
+      });
+      
+    } else {
+      await handleCheckout(selectedPaymentMethod);
+    }
+    
+    setPaymentModalVisible(false);
+    setSelectedPaymentMethod(null);
+  };
 
-  const ProductPerformanceCard = () => (
-    <Card 
-      title="Top Performing Products" 
-      style={{ marginBottom: 16 }}
-      loading={posLoading.stats}
-    >
-      {productPerformance.length > 0 ? (
-        <List
-          dataSource={productPerformance.slice(0, 5)}
-          renderItem={(product, index) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
-                    <Avatar>{product.productName?.charAt(0)?.toUpperCase()}</Avatar>
-                  </Badge>
-                }
-                title={product.productName}
-                description={
-                  <Space>
-                    <Tag color="blue">{product.quantity} sold</Tag>
-                    <Tag color="green">{formatCurrency(product.revenue)}</Tag>
-                  </Space>
+  // Checkout Function
+  const handleCheckout = async (paymentMethod, paymentDetails = {}) => {
+    if (!validateShopAndCashier()) return;
+
+    if (cart.length === 0) {
+      Modal.error({
+        title: 'Empty Cart',
+        content: 'Please add items to cart before checkout.',
+      });
+      return;
+    }
+
+    setPosLoading(prev => ({ ...prev, checkout: true }));
+    
+    try {
+      const generateTransactionNumber = () => {
+        const timestamp = Date.now().toString(36);
+        const random = Math.random().toString(36).substring(2, 8);
+        return `TXN-${timestamp}-${random}`.toUpperCase();
+      };
+
+      // Transaction data
+      const transactionData = {
+        shop: selectedShop._id,
+        shopName: selectedShop.name,
+        cashierId: cashier._id,
+        cashierName: cashier.name || 'Cashier',
+        customerName: paymentDetails.customerName?.trim() || 'Walk-in Customer',
+        customerPhone: paymentDetails.customerPhone || '',
+        transactionNumber: generateTransactionNumber(),
+        items: cart.map(item => ({
+          productId: item.productId,
+          productName: item.name,
+          quantity: Number(item.quantity),
+          price: Number(item.price),
+          totalPrice: Number(item.price * item.quantity),
+          barcode: item.barcode
+        })),
+        totalAmount: Number(totals.subtotal),
+        paymentMethod: paymentMethod,
+        status: 'completed',
+        itemsCount: Number(totals.totalItems),
+        saleDate: new Date().toISOString(),
+        receiptNumber: `RCP-${Date.now()}`
+      };
+
+      // Enhanced payment data for credit
+      if (paymentMethod === 'cash_bank_mpesa') {
+        transactionData.cashAmount = paymentDetails.cashAmount;
+        transactionData.bankMpesaAmount = paymentDetails.bankMpesaAmount;
+        transactionData.paymentSplit = {
+          cash: paymentDetails.cashAmount,
+          bank_mpesa: paymentDetails.bankMpesaAmount
+        };
+      } else if (paymentMethod === 'credit') {
+        transactionData.amountPaid = paymentDetails.amountPaid;
+        transactionData.balanceDue = paymentDetails.balance;
+        transactionData.dueDate = paymentDetails.dueDate;
+        transactionData.creditStatus = paymentDetails.balance > 0 ? 'pending' : 'paid';
+        transactionData.status = paymentDetails.balance > 0 ? 'credit' : 'completed';
+        transactionData.creditShopName = paymentDetails.shopName;
+        transactionData.creditShopId = paymentDetails.shopId;
+      }
+
+      console.log('💰 Sending transaction data:', transactionData);
+
+      // Create transaction
+      const response = await transactionAPI.create(transactionData);
+      const transactionResult = response?.data || response;
+      
+      if (transactionResult && transactionResult._id) {
+        // Create credit record if it's a credit transaction
+        if (paymentMethod === 'credit' && paymentDetails.balance > 0) {
+          try {
+            const creditRecord = {
+              transactionId: transactionResult._id,
+              customerName: paymentDetails.customerName,
+              customerPhone: paymentDetails.customerPhone,
+              totalAmount: totals.subtotal,
+              amountPaid: paymentDetails.amountPaid,
+              balanceDue: paymentDetails.balance,
+              dueDate: paymentDetails.dueDate,
+              shopId: selectedShop._id,
+              shopName: selectedShop.name,
+              cashierId: cashier._id,
+              cashierName: cashier.name,
+              status: 'pending',
+              creditShopName: paymentDetails.shopName,
+              creditShopId: paymentDetails.shopId
+            };
+            
+            await creditAPI.create(creditRecord);
+            console.log('✅ Credit record created');
+          } catch (creditError) {
+            console.error('❌ Error creating credit record:', creditError);
+          }
+        }
+        
+        setCurrentTransaction(transactionResult);
+        setShowReceipt(true);
+        
+        // Refresh stats and today's data
+        await fetchCashierDailyStats();
+        await fetchTodayTransactions();
+        
+        notification.success({
+          message: 'Transaction Completed',
+          description: `Sale completed successfully for ${selectedShop?.name}. Total: ${formatCurrency(totals.subtotal)}`,
+          duration: 3,
+        });
+
+        setCart([]);
+        
+      } else {
+        throw new Error('Transaction failed: Invalid response from server');
+      }
+    } catch (error) {
+      console.error('❌ Checkout error:', error);
+      
+      let errorMessage = 'Failed to process transaction. Please try again.';
+      
+      if (error.message.includes('stock')) {
+        errorMessage = `Stock error: ${error.message}`;
+      } else if (error.message.includes('network') || error.message.includes('Network')) {
+        errorMessage = 'Network error. Please check your connection.';
+      }
+      
+      notification.error({
+        message: 'Checkout Failed',
+        description: errorMessage,
+        duration: 5,
+      });
+
+      await fetchProducts();
+    } finally {
+      setPosLoading(prev => ({ ...prev, checkout: false }));
+    }
+  };
+
+  // Today's Transactions Display Component
+  const TodaysTransactionsCard = () => {
+    const allTransactions = [...todayTransactions];
+
+    // Calculate totals
+    const totalSales = allTransactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+    const creditSales = allTransactions
+      .filter(t => t.paymentMethod === 'credit')
+      .reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+    const cashSales = totalSales - creditSales;
+
+    const transactionColumns = [
+      {
+        title: 'Transaction',
+        dataIndex: 'transactionNumber',
+        key: 'transactionNumber',
+        width: 120,
+        render: (text, record) => (
+          <Space direction="vertical" size={0}>
+            <Text strong style={{ fontSize: '12px' }}>{text}</Text>
+            <Text type="secondary" style={{ fontSize: '10px' }}>
+              {dayjs(record.saleDate).format('HH:mm')}
+            </Text>
+          </Space>
+        )
+      },
+      {
+        title: 'Customer',
+        dataIndex: 'customerName',
+        key: 'customerName',
+        width: 120,
+        render: (text) => (
+          <Text style={{ fontSize: '12px' }}>{text || 'Walk-in'}</Text>
+        )
+      },
+      {
+        title: 'Payment Method',
+        dataIndex: 'paymentMethod',
+        key: 'paymentMethod',
+        width: 100,
+        render: (method) => (
+          <Tag 
+            color={method === 'credit' ? 'orange' : method === 'cash_bank_mpesa' ? 'purple' : 'green'}
+            style={{ fontSize: '11px', margin: 0 }}
+          >
+            {method?.toUpperCase() || 'CASH'}
+          </Tag>
+        )
+      },
+      {
+        title: 'Items',
+        dataIndex: 'itemsCount',
+        key: 'itemsCount',
+        width: 60,
+        render: (count) => (
+          <Text style={{ fontSize: '12px' }}>{count || 0}</Text>
+        )
+      },
+      {
+        title: 'Amount',
+        dataIndex: 'totalAmount',
+        key: 'totalAmount',
+        width: 100,
+        render: (amount) => (
+          <Text strong style={{ fontSize: '12px' }}>
+            {formatCurrency(amount)}
+          </Text>
+        )
+      },
+      {
+        title: 'Status',
+        dataIndex: 'status',
+        key: 'status',
+        width: 80,
+        render: (status, record) => {
+          const isCredit = record.paymentMethod === 'credit';
+          return (
+            <Tag 
+              color={isCredit ? 'orange' : 'green'}
+              style={{ fontSize: '10px', margin: 0 }}
+            >
+              {isCredit ? 'CREDIT' : 'PAID'}
+            </Tag>
+          );
+        }
+      }
+    ];
+
+    const creditColumns = [
+      {
+        title: 'Customer',
+        dataIndex: 'customerName',
+        key: 'customerName',
+        width: 120,
+        render: (text, record) => (
+          <Space direction="vertical" size={0}>
+            <Text strong style={{ fontSize: '12px' }}>{text}</Text>
+            {record.customerPhone && (
+              <Text type="secondary" style={{ fontSize: '10px' }}>
+                {record.customerPhone}
+              </Text>
+            )}
+          </Space>
+        )
+      },
+      {
+        title: 'Shop Classification',
+        dataIndex: 'creditShopName',
+        key: 'creditShopName',
+        width: 140,
+        render: (text, record) => (
+          <Space direction="vertical" size={0}>
+            <Text style={{ fontSize: '11px' }}>{text || record.shopName}</Text>
+            <Text type="secondary" style={{ fontSize: '9px' }}>
+              Due: {dayjs(record.dueDate).format('DD/MM')}
+            </Text>
+          </Space>
+        )
+      },
+      {
+        title: 'Total Amount',
+        dataIndex: 'totalAmount',
+        key: 'totalAmount',
+        width: 100,
+        render: (amount) => (
+          <Text strong style={{ fontSize: '12px' }}>
+            {formatCurrency(amount)}
+          </Text>
+        )
+      },
+      {
+        title: 'Amount Paid',
+        dataIndex: 'amountPaid',
+        key: 'amountPaid',
+        width: 100,
+        render: (amount) => (
+          <Text type="success" style={{ fontSize: '12px' }}>
+            {formatCurrency(amount)}
+          </Text>
+        )
+      },
+      {
+        title: 'Balance Due',
+        dataIndex: 'balanceDue',
+        key: 'balanceDue',
+        width: 100,
+        render: (balance) => (
+          <Text strong type="danger" style={{ fontSize: '12px' }}>
+            {formatCurrency(balance)}
+          </Text>
+        )
+      },
+      {
+        title: 'Status',
+        dataIndex: 'status',
+        key: 'status',
+        width: 100,
+        render: (status) => {
+          const statusConfig = {
+            pending: { color: 'orange', text: 'PENDING' },
+            partially_paid: { color: 'blue', text: 'PARTIAL' },
+            paid: { color: 'green', text: 'PAID' },
+            overdue: { color: 'red', text: 'OVERDUE' }
+          };
+          const config = statusConfig[status] || statusConfig.pending;
+          return (
+            <Tag color={config.color} style={{ fontSize: '10px', margin: 0 }}>
+              {config.text}
+            </Tag>
+          );
+        }
+      }
+    ];
+
+    return (
+      <div>
+        {/* Summary Cards */}
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          <Col xs={12} sm={8} md={6}>
+            <Card size="small">
+              <Statistic
+                title="Total Sales (Including Credit)"
+                value={totalSales}
+                precision={2}
+                prefix="KES"
+                valueStyle={{ color: '#3f8600', fontSize: '16px' }}
+                suffix={
+                  <Tooltip title="Includes all sales: Cash, Bank/Mpesa, and Credit">
+                    <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: '12px' }} />
+                  </Tooltip>
                 }
               />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No product performance data available" />
-      )}
-    </Card>
-  );
-
-  const HourlyAnalysisCard = () => (
-    <Card 
-      title="Sales by Hour" 
-      style={{ marginBottom: 16 }}
-      loading={posLoading.stats}
-    >
-      {hourlyAnalysis.length > 0 ? (
-        <List
-          dataSource={hourlyAnalysis.filter(hour => hour.sales > 0)}
-          renderItem={hour => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={<Avatar style={{ backgroundColor: '#1890ff' }}>{hour.hour}</Avatar>}
-                title={`${hour.hour}:00 - ${hour.hour + 1}:00`}
-                description={
-                  <Space>
-                    <Text>{formatCurrency(hour.sales)}</Text>
-                    <Text type="secondary">{hour.transactions} transactions</Text>
-                    <Text type="secondary">{hour.items} items</Text>
-                  </Space>
-                }
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6}>
+            <Card size="small">
+              <Statistic
+                title="Credit Sales"
+                value={creditSales}
+                precision={2}
+                prefix="KES"
+                valueStyle={{ color: '#fa8c16', fontSize: '16px' }}
               />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No hourly analysis data available" />
-      )}
-    </Card>
-  );
-
-  const CreditAnalysisCard = () => (
-    <Card 
-      title="Credit Sales Analysis" 
-      style={{ marginBottom: 16 }}
-      loading={posLoading.stats}
-    >
-      {creditAnalysis.length > 0 ? (
-        <List
-          dataSource={creditAnalysis.slice(0, 5)}
-          renderItem={credit => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={<Avatar icon={<CreditCardOutlined />} />}
-                title={credit.customerName}
-                description={
-                  <Space direction="vertical" size={0}>
-                    <Text>Total: {formatCurrency(credit.totalAmount)}</Text>
-                    <Text>Balance: {formatCurrency(credit.balanceDue)}</Text>
-                    <Tag color={credit.isOverdue ? 'red' : 'orange'}>
-                      {credit.isOverdue ? 'OVERDUE' : `Due in ${credit.daysUntilDue} days`}
-                    </Tag>
-                  </Space>
-                }
+              <Text type="secondary" style={{ fontSize: '11px' }}>
+                {todayCredits.length} credit records
+              </Text>
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6}>
+            <Card size="small">
+              <Statistic
+                title="Cash Sales"
+                value={cashSales}
+                precision={2}
+                prefix="KES"
+                valueStyle={{ color: '#52c41a', fontSize: '16px' }}
               />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No credit analysis data available" />
-      )}
-    </Card>
-  );
+              <Text type="secondary" style={{ fontSize: '11px' }}>
+                Cash & Bank/Mpesa
+              </Text>
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6}>
+            <Card size="small">
+              <Statistic
+                title="Total Transactions"
+                value={allTransactions.length}
+                valueStyle={{ color: '#1890ff', fontSize: '18px' }}
+              />
+              <Text type="secondary" style={{ fontSize: '11px' }}>
+                All completed sales
+              </Text>
+            </Card>
+          </Col>
+        </Row>
 
-  // Enhanced Payment Method Modal
+        <Tabs defaultActiveKey="transactions">
+          <Tabs.TabPane 
+            tab={
+              <span>
+                <TransactionOutlined />
+                All Transactions ({allTransactions.length})
+              </span>
+            } 
+            key="transactions"
+          >
+            <Card>
+              <Table
+                columns={transactionColumns}
+                dataSource={allTransactions}
+                rowKey="_id"
+                pagination={{ pageSize: 10 }}
+                size="small"
+                scroll={{ x: 600 }}
+                locale={{ emptyText: 'No transactions today' }}
+              />
+            </Card>
+          </Tabs.TabPane>
+
+          <Tabs.TabPane 
+            tab={
+              <span>
+                <CreditCardOutlined />
+                Credit Transactions ({todayCredits.length})
+              </span>
+            } 
+            key="credits"
+          >
+            <Card>
+              <Table
+                columns={creditColumns}
+                dataSource={todayCredits}
+                rowKey="_id"
+                pagination={{ pageSize: 10 }}
+                size="small"
+                scroll={{ x: 700 }}
+                locale={{ emptyText: 'No credit transactions today' }}
+                summary={() => {
+                  const totalCreditAmount = todayCredits.reduce((sum, c) => sum + (c.totalAmount || 0), 0);
+                  const totalPaid = todayCredits.reduce((sum, c) => sum + (c.amountPaid || 0), 0);
+                  const totalBalance = todayCredits.reduce((sum, c) => sum + (c.balanceDue || 0), 0);
+
+                  return (
+                    <Table.Summary>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={2}>
+                          <Text strong>Totals:</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={2}>
+                          <Text strong>{formatCurrency(totalCreditAmount)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={3}>
+                          <Text strong type="success">{formatCurrency(totalPaid)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={4}>
+                          <Text strong type="danger">{formatCurrency(totalBalance)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={5}></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  );
+                }}
+              />
+            </Card>
+          </Tabs.TabPane>
+        </Tabs>
+      </div>
+    );
+  };
+
+  // Product Row Component
+  const ProductRow = React.memo(({ product, onAddToCart, disabled }) => {
+    const stockStatus = useMemo(() => {
+      const stock = product.currentStock || 0;
+      if (stock <= 0) return { status: 'out', color: 'red', text: 'Out of Stock' };
+      if (stock <= (product.minStockLevel || 5)) return { status: 'low', color: 'orange', text: 'Low Stock' };
+      return { status: 'in', color: 'green', text: 'In Stock' };
+    }, [product.currentStock, product.minStockLevel]);
+
+    const handleAddToCart = () => {
+      onAddToCart(product, 1);
+    };
+
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          marginBottom: '8px',
+          backgroundColor: '#fff',
+          border: '1px solid #f0f0f0',
+          borderRadius: '8px',
+          transition: 'all 0.3s',
+          cursor: stockStatus.status === 'out' ? 'not-allowed' : 'pointer',
+          opacity: stockStatus.status === 'out' ? 0.6 : 1,
+        }}
+        onMouseEnter={(e) => {
+          if (stockStatus.status !== 'out') {
+            e.currentTarget.style.backgroundColor = '#fafafa';
+            e.currentTarget.style.borderColor = '#d9d9d9';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (stockStatus.status !== 'out') {
+            e.currentTarget.style.backgroundColor = '#fff';
+            e.currentTarget.style.borderColor = '#f0f0f0';
+          }
+        }}
+      >
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            backgroundColor: '#f0f2f5',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <ShoppingCartOutlined style={{ fontSize: '18px', color: '#1890ff' }} />
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text 
+              strong 
+              ellipsis={{ tooltip: product.name }} 
+              style={{ 
+                display: 'block',
+                fontSize: '14px',
+                lineHeight: '1.4',
+                marginBottom: '2px'
+              }}
+            >
+              {product.name}
+            </Text>
+            
+            <Space size={8} style={{ flexWrap: 'wrap' }}>
+              <Text 
+                strong 
+                style={{ 
+                  color: '#1890ff', 
+                  fontSize: '14px'
+                }}
+              >
+                KES {(product.minSellingPrice || product.sellingPrice || 0).toLocaleString()}
+              </Text>
+              
+              <Tag 
+                color={stockStatus.color} 
+                style={{ 
+                  margin: 0, 
+                  fontSize: '11px',
+                  padding: '1px 6px',
+                  lineHeight: '1.2'
+                }}
+              >
+                Stock: {product.currentStock || 0}
+              </Tag>
+              
+              {product.category && (
+                <Tag 
+                  color="blue" 
+                  style={{ 
+                    fontSize: '11px', 
+                    margin: 0,
+                    padding: '1px 6px',
+                    lineHeight: '1.2'
+                  }}
+                >
+                  {product.category}
+                </Tag>
+              )}
+            </Space>
+          </div>
+        </div>
+
+        <div style={{ flexShrink: 0, marginLeft: '16px' }}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleAddToCart}
+            disabled={stockStatus.status === 'out' || disabled}
+            size="small"
+            style={{
+              fontSize: '12px',
+              height: '32px',
+              minWidth: '100px'
+            }}
+          >
+            Add to Cart
+          </Button>
+        </div>
+      </div>
+    );
+  });
+
+  // Payment Method Modal
   const renderPaymentModal = () => {
     const modalTitle = `Select Payment Method - ${formatCurrency(totals.subtotal)}`;
 
@@ -1599,12 +1417,14 @@ const CashierDashboard = () => {
             initialValues={{
               amountPaid: 0,
               balance: totals.subtotal,
-              dueDate: dayjs().add(7, 'day')
+              dueDate: dayjs().add(7, 'day'),
+              shopName: selectedShop?.name || '',
+              shopId: selectedShop?._id || ''
             }}
           >
             <Alert
-              message="Credit Sale"
-              description="Please enter customer details and payment information"
+              message="Credit Sale - Shop Classification Required"
+              description="Please enter customer details and shop information for credit classification"
               type="warning"
               showIcon
               style={{ marginBottom: '16px' }}
@@ -1635,6 +1455,33 @@ const CashierDashboard = () => {
                   <Input 
                     prefix={<PhoneOutlined />} 
                     placeholder="e.g., 0712345678" 
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+            
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item
+                  label="Shop Name"
+                  name="shopName"
+                  rules={[{ required: true, message: 'Shop name is required for credit classification' }]}
+                >
+                  <Input 
+                    prefix={<ShopOutlined />} 
+                    placeholder="Enter shop name" 
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  label="Shop ID"
+                  name="shopId"
+                  rules={[{ required: true, message: 'Shop ID is required for credit classification' }]}
+                >
+                  <Input 
+                    prefix={<ShopOutlined />} 
+                    placeholder="Enter shop ID" 
                   />
                 </Form.Item>
               </Col>
@@ -1713,6 +1560,11 @@ const CashierDashboard = () => {
                   {creditForm.getFieldValue('dueDate')?.format('DD/MM/YYYY') || 'Not set'}
                 </Text>
               </Descriptions.Item>
+              <Descriptions.Item label="Shop Classification">
+                <Text strong>
+                  {creditForm.getFieldValue('shopName') || 'Not set'}
+                </Text>
+              </Descriptions.Item>
             </Descriptions>
           </Form>
         ) : (
@@ -1735,10 +1587,9 @@ const CashierDashboard = () => {
   // Initial data fetch
   useEffect(() => {
     if (selectedShop) {
-      fetchAvailableShops();
       fetchProducts(true);
       fetchCashierDailyStats();
-      fetchDailySales();
+      fetchTodayTransactions();
     }
   }, [selectedShop]);
 
@@ -1755,7 +1606,7 @@ const CashierDashboard = () => {
         <Spin size="large" />
         <div style={{ marginTop: 16 }}>
           <Text type="secondary">
-            {!selectedShop ? 'No shop selected. Redirecting...' : 'Loading enhanced dashboard...'}
+            {!selectedShop ? 'No shop selected. Redirecting...' : 'Loading cashier dashboard...'}
           </Text>
         </div>
       </div>
@@ -1782,7 +1633,7 @@ const CashierDashboard = () => {
                 Change Shop
               </Button>
               <Title level={4} style={{ margin: 0 }}>
-                <ShopOutlined /> {selectedShop?.name || 'Cashier Portal'} - Enhanced Cashier Portal
+                <ShopOutlined /> {selectedShop?.name || 'Cashier Portal'}
               </Title>
               <Tag color="blue">
                 <UserOutlined /> {cashier?.name || 'Cashier'}
@@ -1791,29 +1642,20 @@ const CashierDashboard = () => {
           </Col>
           <Col>
             <Space>
-              <Select
-                value={selectedShop?._id}
-                onChange={handleShopChange}
-                style={{ width: 200 }}
-                placeholder="Select Shop"
-              >
-                {availableShops.map(shop => (
-                  <Option key={shop._id} value={shop._id}>
-                    {shop.name}
-                  </Option>
-                ))}
-              </Select>
+              <Text strong type="secondary">
+                Today: {dayjs().format('DD/MM/YYYY')}
+              </Text>
               <Button 
                 icon={<ReloadOutlined />}
                 onClick={() => {
                   fetchCashierDailyStats();
-                  fetchDailySales();
+                  fetchTodayTransactions();
                   fetchProducts();
                 }}
-                loading={posLoading.stats || statsLoading}
+                loading={posLoading.stats}
                 size="small"
               >
-                Refresh All
+                Refresh
               </Button>
               <Button 
                 icon={<LogoutOutlined />}
@@ -1831,49 +1673,22 @@ const CashierDashboard = () => {
       <Content style={{ padding: '24px' }}>
         {/* Enhanced Performance Header */}
         <Card 
-          style={{ marginBottom: '24px' }}
+          style={{ marginBottom: '16px' }}
           loading={posLoading.stats}
         >
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={12} md={4}>
               <Statistic
-                title="Today's Sales"
+                title="Total Sales (Including Credit)"
                 value={dailyStats.totalSales}
                 precision={2}
                 prefix="KES"
-                valueStyle={{ color: '#3f8600' }}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Today's Transactions"
-                value={dailyStats.totalTransactions}
-                valueStyle={{ color: '#1890ff' }}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Items Sold Today"
-                value={dailyStats.cashierItemsSold}
-                valueStyle={{ color: '#52c41a' }}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Cash Collected"
-                value={dailyStats.cashAmount}
-                precision={2}
-                prefix="KES"
-                valueStyle={{ color: '#cf1322' }}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Bank/Mpesa"
-                value={dailyStats.bankMpesaAmount}
-                precision={2}
-                prefix="KES"
-                valueStyle={{ color: '#722ed1' }}
+                valueStyle={{ color: '#3f8600', fontSize: '16px' }}
+                suffix={
+                  <Tooltip title="Includes all sales: Cash, Bank/Mpesa, and Credit">
+                    <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: '14px' }} />
+                  </Tooltip>
+                }
               />
             </Col>
             <Col xs={24} sm={12} md={4}>
@@ -1882,37 +1697,102 @@ const CashierDashboard = () => {
                 value={dailyStats.creditAmount}
                 precision={2}
                 prefix="KES"
-                valueStyle={{ color: '#fa8c16' }}
+                valueStyle={{ 
+                  color: dailyStats.creditAmount > 0 ? '#fa8c16' : '#8c8c8c',
+                  fontSize: '16px',
+                  fontWeight: 'bold'
+                }}
+              />
+              <div style={{ marginTop: '4px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  {dailyStats.creditTransactions || 0} credit transactions
+                </Text>
+              </div>
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Statistic
+                title="Cash Sales"
+                value={dailyStats.cashAmount}
+                precision={2}
+                prefix="KES"
+                valueStyle={{ color: '#cf1322', fontSize: '16px' }}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Statistic
+                title="Bank/Mpesa Sales"
+                value={dailyStats.bankMpesaAmount}
+                precision={2}
+                prefix="KES"
+                valueStyle={{ color: '#722ed1', fontSize: '16px' }}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Statistic
+                title="Total Transactions"
+                value={dailyStats.totalTransactions}
+                valueStyle={{ color: '#1890ff', fontSize: '18px' }}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Statistic
+                title="Items Sold"
+                value={dailyStats.cashierItemsSold}
+                valueStyle={{ color: '#52c41a', fontSize: '18px' }}
               />
             </Col>
           </Row>
-          
-          {/* Enhanced Payment Method Breakdown */}
-          {dailyStats.totalSales > 0 && (
-            <div style={{ marginTop: 16, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: 6 }}>
-              <Text strong>Payment Methods: </Text>
-              {Object.entries(dailyStats.paymentMethodBreakdown || {})
-                .filter(([method, amount]) => amount > 0)
-                .map(([method, amount]) => (
-                  <Tag 
-                    key={method} 
-                    color={
-                      method === 'cash' ? 'orange' : 
-                      method === 'bank_mpesa' ? 'blue' :
-                      method === 'cash_bank_mpesa' ? 'purple' : 'red'
-                    }
-                    style={{ marginLeft: 8 }}
-                  >
-                    {method === 'cash_bank_mpesa' ? 'CASH/BANK/MPESA' : 
-                     method === 'bank_mpesa' ? 'BANK/MPESA' : method.toUpperCase()}: {formatCurrency(amount)}
-                  </Tag>
-                ))
-              }
-            </div>
-          )}
+
+          {/* Sales Breakdown Summary */}
+          <div style={{ marginTop: '16px', padding: '12px', background: '#f9f9f9', borderRadius: '6px' }}>
+            <Row gutter={16}>
+              <Col span={24}>
+                <Text strong>Sales Breakdown: </Text>
+                <Text>
+                  Total Sales ({formatCurrency(dailyStats.totalSales)}) = 
+                  Cash ({formatCurrency(dailyStats.cashAmount)}) + 
+                  Bank/Mpesa ({formatCurrency(dailyStats.bankMpesaAmount)}) + 
+                  Credit ({formatCurrency(dailyStats.creditAmount)})
+                </Text>
+              </Col>
+            </Row>
+          </div>
         </Card>
 
-        {/* Enhanced Main Tabs */}
+        {/* Credit Sales Percentage Indicator */}
+        {dailyStats.totalSales > 0 && (
+          <Card size="small" style={{ marginBottom: '24px' }}>
+            <Row gutter={16} align="middle">
+              <Col xs={24} sm={8}>
+                <Space>
+                  <CreditCardOutlined style={{ color: '#fa8c16' }} />
+                  <Text strong>Credit Sales Percentage:</Text>
+                  <Text 
+                    strong 
+                    style={{ 
+                      color: creditPercentage > 30 ? '#cf1322' : '#389e0d',
+                      fontSize: '16px'
+                    }}
+                  >
+                    {creditPercentage.toFixed(1)}%
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={16}>
+                <Progress 
+                  percent={Math.round(creditPercentage)}
+                  strokeColor={{
+                    '0%': '#ffa940',
+                    '100%': '#fa8c16',
+                  }}
+                  format={percent => `${percent}% Credit Sales`}
+                />
+              </Col>
+            </Row>
+          </Card>
+        )}
+
+        {/* Main Tabs - POS and Transactions */}
         <Tabs 
           activeKey={activeTab} 
           onChange={setActiveTab}
@@ -1929,34 +1809,6 @@ const CashierDashboard = () => {
             key="pos"
           >
             <Row gutter={[16, 16]}>
-              {/* Barcode Scanner Input */}
-              {scanMode && (
-                <Col span={24}>
-                  <Card size="small" title="Barcode Scanner" extra={<Tag color="blue">Scan Mode</Tag>}>
-                    <Space.Compact style={{ width: '100%' }}>
-                      <Input
-                        placeholder="Scan barcode or enter manually..."
-                        value={barcodeInput}
-                        onChange={(e) => setBarcodeInput(e.target.value)}
-                        onPressEnter={handleBarcodeScan}
-                        autoFocus
-                        prefix={<BarcodeOutlined />}
-                      />
-                      <Button 
-                        type="primary" 
-                        onClick={handleBarcodeScan}
-                        loading={posLoading.products}
-                      >
-                        Add Product
-                      </Button>
-                      <Button onClick={() => setScanMode(false)}>
-                        Cancel
-                      </Button>
-                    </Space.Compact>
-                  </Card>
-                </Col>
-              )}
-
               {/* Products Section */}
               <Col xs={24} lg={14}>
                 <Card
@@ -1988,27 +1840,13 @@ const CashierDashboard = () => {
                         style={{ width: 250 }}
                         allowClear
                       />
-                      <Select
-                        value={selectedCategory}
-                        onChange={setSelectedCategory}
-                        style={{ width: 150 }}
-                        placeholder="Category"
-                        allowClear
+                      <Button 
+                        icon={<ReloadOutlined />} 
+                        onClick={() => fetchProducts(true)}
+                        loading={posLoading.products}
                       >
-                        <Option value="all">All Categories</Option>
-                        {categories.map(category => (
-                          <Option key={category} value={category}>
-                            {category}
-                          </Option>
-                        ))}
-                      </Select>
-                      <Tooltip title="Refresh Products">
-                        <Button 
-                          icon={<ReloadOutlined />} 
-                          onClick={() => fetchProducts(true)}
-                          loading={posLoading.products}
-                        />
-                      </Tooltip>
+                        Refresh
+                      </Button>
                     </Space>
                   }
                   loading={posLoading.products}
@@ -2016,7 +1854,7 @@ const CashierDashboard = () => {
                   {filteredProducts.length === 0 ? (
                     <Empty
                       description={
-                        searchTerm || selectedCategory !== 'all' 
+                        searchTerm
                           ? "No products match your search criteria"
                           : `No products available for ${selectedShop?.name}`
                       }
@@ -2053,7 +1891,6 @@ const CashierDashboard = () => {
                   onRemoveItem={removeFromCart}
                   onClearCart={clearCart}
                   onCheckout={handlePaymentMethodSelect}
-                  onUpdateItemPrice={updateCartItemPrice}
                   loading={posLoading.checkout}
                   totals={totals}
                   shop={selectedShop}
@@ -2087,179 +1924,26 @@ const CashierDashboard = () => {
             </FloatButton.Group>
           </TabPane>
 
-          {/* Enhanced Sales Dashboard Tab */}
+          {/* Today's Transactions Tab */}
           <TabPane 
             tab={
               <span>
-                <BarChartOutlined />
-                Enhanced Analytics
+                <FileTextOutlined />
+                Today's Transactions
+                <Badge 
+                  count={todayTransactions.length + todayCredits.length} 
+                  showZero 
+                  style={{ marginLeft: 8 }} 
+                />
               </span>
             } 
-            key="dashboard"
+            key="transactions"
           >
-            {/* Date Range Picker */}
-            <Card style={{ marginBottom: '24px' }}>
-              <Space>
-                <Text strong>Date Range:</Text>
-                <RangePicker
-                  value={dateRange}
-                  onChange={(dates) => setDateRange(dates)}
-                  format="DD/MM/YYYY"
-                  allowClear={false}
-                />
-                <Text type="secondary">
-                  Showing data for {dateRange[0].format('DD/MM/YYYY')} to {dateRange[1].format('DD/MM/YYYY')}
-                </Text>
-              </Space>
-            </Card>
-
-            {/* Enhanced Daily Stats Overview */}
-            <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-              <Col xs={24} sm={12} md={6}>
-                <Card>
-                  <Statistic
-                    title="Total Sales"
-                    value={dailyStats.totalSales}
-                    precision={2}
-                    prefix="KES"
-                    valueStyle={{ color: '#3f8600' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-              <Col xs={24} sm={12} md={6}>
-                <Card>
-                  <Statistic
-                    title="Transactions"
-                    value={dailyStats.totalTransactions}
-                    valueStyle={{ color: '#1890ff' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-              <Col xs={24} sm={12} md={6}>
-                <Card>
-                  <Statistic
-                    title="Items Sold"
-                    value={dailyStats.cashierItemsSold}
-                    valueStyle={{ color: '#52c41a' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-              <Col xs={24} sm={12} md={6}>
-                <Card>
-                  <Statistic
-                    title="Avg. Transaction"
-                    value={dailyStats.averageTransaction}
-                    precision={2}
-                    prefix="KES"
-                    valueStyle={{ color: '#722ed1' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-            </Row>
-
-            {/* Enhanced Money Collection Classification */}
-            <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-              <Col xs={24} sm={12} md={8}>
-                <Card>
-                  <Statistic
-                    title={
-                      <Space>
-                        <MoneyCollectOutlined />
-                        Cash Collected
-                      </Space>
-                    }
-                    value={dailyStats.cashAmount}
-                    precision={2}
-                    prefix="KES"
-                    valueStyle={{ color: '#cf1322' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-              <Col xs={24} sm={12} md={8}>
-                <Card>
-                  <Statistic
-                    title={
-                      <Space>
-                        <BankOutlined />
-                        Bank/Mpesa
-                      </Space>
-                    }
-                    value={dailyStats.bankMpesaAmount}
-                    precision={2}
-                    prefix="KES"
-                    valueStyle={{ color: '#722ed1' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-              <Col xs={24} sm={12} md={8}>
-                <Card>
-                  <Statistic
-                    title={
-                      <Space>
-                        <CreditCardOutlined />
-                        Credit Sales
-                      </Space>
-                    }
-                    value={dailyStats.creditAmount}
-                    precision={2}
-                    prefix="KES"
-                    valueStyle={{ color: '#fa8c16' }}
-                    loading={statsLoading}
-                  />
-                </Card>
-              </Col>
-            </Row>
-
-            {/* Enhanced Analysis Section */}
-            <Row gutter={[16, 16]}>
-              <Col xs={24} lg={12}>
-                <PerformanceMetricsCard />
-                <ProductPerformanceCard />
-              </Col>
-              <Col xs={24} lg={12}>
-                <HourlyAnalysisCard />
-                <CreditAnalysisCard />
-              </Col>
-            </Row>
-
-            {/* Recent Transactions */}
-            <Card
-              title={
-                <Space>
-                  <TransactionOutlined />
-                  <span>Recent Transactions - {selectedShop?.name}</span>
-                  <Tag>{transactions.length} transactions</Tag>
-                </Space>
-              }
-              loading={statsLoading}
-            >
-              {transactions.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px' }}>
-                  <ShoppingCartOutlined style={{ fontSize: '48px', color: '#d9d9d9' }} />
-                  <div style={{ marginTop: '16px' }}>
-                    <Text type="secondary">No transactions found for the selected date range</Text>
-                  </div>
-                </div>
-              ) : (
-                <Table
-                  dataSource={transactions}
-                  columns={dashboardColumns}
-                  rowKey="_id"
-                  pagination={{ pageSize: 10 }}
-                  size="small"
-                />
-              )}
-            </Card>
+            <TodaysTransactionsCard />
           </TabPane>
         </Tabs>
 
-        {/* Enhanced Payment Method Modal */}
+        {/* Payment Method Modal */}
         {renderPaymentModal()}
 
         {/* Receipt Modal */}
@@ -2300,218 +1984,5 @@ const CashierDashboard = () => {
     </Layout>
   );
 };
-
-// Enhanced Product Row Component
-const ProductRow = React.memo(({ product, onAddToCart, disabled }) => {
-  const [editingPrice, setEditingPrice] = useState(false);
-  const [currentPrice, setCurrentPrice] = useState(
-    product.minSellingPrice || product.sellingPrice || product.price || 0
-  );
-  const [originalPrice] = useState(
-    product.minSellingPrice || product.sellingPrice || product.price || 0
-  );
-
-  const stockStatus = useMemo(() => {
-    const stock = product.currentStock || 0;
-    if (stock <= 0) return { status: 'out', color: 'red', text: 'Out of Stock' };
-    if (stock <= (product.minStockLevel || 5)) return { status: 'low', color: 'orange', text: 'Low Stock' };
-    return { status: 'in', color: 'green', text: 'In Stock' };
-  }, [product.currentStock, product.minStockLevel]);
-
-  const handlePriceUpdate = () => {
-    if (currentPrice < originalPrice) {
-      message.error('New price cannot be lower than original price');
-      setCurrentPrice(originalPrice);
-      return;
-    }
-
-    if (currentPrice <= 0) {
-      message.error('Price must be greater than 0');
-      setCurrentPrice(originalPrice);
-      return;
-    }
-
-    setEditingPrice(false);
-    message.success('Price updated successfully');
-  };
-
-  const handleAddToCart = () => {
-    const productWithUpdatedPrice = {
-      ...product,
-      minSellingPrice: currentPrice,
-      sellingPrice: currentPrice,
-      price: currentPrice
-    };
-    onAddToCart(productWithUpdatedPrice, 1, currentPrice);
-  };
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 16px',
-        marginBottom: '8px',
-        backgroundColor: '#fff',
-        border: '1px solid #f0f0f0',
-        borderRadius: '8px',
-        transition: 'all 0.3s',
-        cursor: stockStatus.status === 'out' ? 'not-allowed' : 'pointer',
-        opacity: stockStatus.status === 'out' ? 0.6 : 1,
-      }}
-      onMouseEnter={(e) => {
-        if (stockStatus.status !== 'out') {
-          e.currentTarget.style.backgroundColor = '#fafafa';
-          e.currentTarget.style.borderColor = '#d9d9d9';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (stockStatus.status !== 'out') {
-          e.currentTarget.style.backgroundColor = '#fff';
-          e.currentTarget.style.borderColor = '#f0f0f0';
-        }
-      }}
-    >
-      {/* Product Information */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{
-          width: '40px',
-          height: '40px',
-          backgroundColor: '#f0f2f5',
-          borderRadius: '6px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0
-        }}>
-          <ShoppingCartOutlined style={{ fontSize: '18px', color: '#1890ff' }} />
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Text 
-            strong 
-            ellipsis={{ tooltip: product.name }} 
-            style={{ 
-              display: 'block',
-              fontSize: '14px',
-              lineHeight: '1.4',
-              marginBottom: '2px'
-            }}
-          >
-            {product.name}
-          </Text>
-          
-          <Space size={8} style={{ flexWrap: 'wrap' }}>
-            {editingPrice ? (
-              <Space.Compact>
-                <InputNumber
-                  value={currentPrice}
-                  onChange={setCurrentPrice}
-                  onPressEnter={handlePriceUpdate}
-                  onBlur={handlePriceUpdate}
-                  min={originalPrice}
-                  step={1}
-                  precision={2}
-                  autoFocus
-                  style={{ width: '100px' }}
-                  formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={value => value.replace(/KES\s?|(,*)/g, '')}
-                />
-                <Button 
-                  type="primary" 
-                  size="small" 
-                  onClick={handlePriceUpdate}
-                >
-                  OK
-                </Button>
-                <Button 
-                  size="small" 
-                  onClick={() => {
-                    setCurrentPrice(originalPrice);
-                    setEditingPrice(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </Space.Compact>
-            ) : (
-              <Tooltip title="Click to edit price (can only increase)">
-                <Text 
-                  strong 
-                  style={{ 
-                    color: '#1890ff', 
-                    fontSize: '14px',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => setEditingPrice(true)}
-                >
-                  KES {currentPrice.toLocaleString()}
-                </Text>
-              </Tooltip>
-            )}
-            
-            <Tag 
-              color={stockStatus.color} 
-              style={{ 
-                margin: 0, 
-                fontSize: '11px',
-                padding: '1px 6px',
-                lineHeight: '1.2'
-              }}
-            >
-              Stock: {product.currentStock || 0}
-            </Tag>
-            
-            {product.category && (
-              <Tag 
-                color="blue" 
-                style={{ 
-                  fontSize: '11px', 
-                  margin: 0,
-                  padding: '1px 6px',
-                  lineHeight: '1.2'
-                }}
-              >
-                {product.category}
-              </Tag>
-            )}
-            
-            {product.barcode && (
-              <Text 
-                type="secondary" 
-                style={{ 
-                  fontSize: '11px'
-                }}
-              >
-                <BarcodeOutlined /> {product.barcode}
-              </Text>
-            )}
-          </Space>
-        </div>
-      </div>
-
-      {/* Add to Cart Button */}
-      <div style={{ flexShrink: 0, marginLeft: '16px' }}>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={handleAddToCart}
-          disabled={stockStatus.status === 'out' || disabled}
-          size="small"
-          style={{
-            fontSize: '12px',
-            height: '32px',
-            minWidth: '100px'
-          }}
-        >
-          Add to Cart
-        </Button>
-      </div>
-    </div>
-  );
-});
-
-ProductRow.displayName = 'ProductRow';
 
 export default CashierDashboard;
