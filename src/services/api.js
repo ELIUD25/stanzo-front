@@ -1,16 +1,11 @@
 import axios from 'axios';
-import dayjs from 'dayjs';
+import { CalculationUtils } from '../utils/calculationUtils';
 
 // Configuration
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001/api';
 const REQUEST_TIMEOUT = 30000;
 
-// Request queue and rate limiting
-let requestQueue = [];
-let isProcessingQueue = false;
-const REQUEST_DELAY = 100;
-
-// Create axios instance with better error handling
+// Create axios instance
 const createApiInstance = (baseURL = API_BASE_URL) => {
   const instance = axios.create({
     baseURL,
@@ -23,7 +18,7 @@ const createApiInstance = (baseURL = API_BASE_URL) => {
   // Request interceptor to add auth token
   instance.interceptors.request.use(
     (config) => {
-      const token = localStorage.getItem('adminToken') || localStorage.getItem('userToken');
+      const token = localStorage.getItem('adminToken') || localStorage.getItem('userToken') || localStorage.getItem('cashierToken');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -41,11 +36,12 @@ const createApiInstance = (baseURL = API_BASE_URL) => {
       if (error.response?.status === 401) {
         localStorage.removeItem('adminToken');
         localStorage.removeItem('userToken');
+        localStorage.removeItem('cashierToken');
         localStorage.removeItem('userData');
         localStorage.removeItem('adminData');
         localStorage.removeItem('cashierData');
         if (typeof window !== 'undefined') {
-          window.location.href = '/admin/login';
+          window.location.href = '/cashier/login';
         }
       }
       return Promise.reject(error);
@@ -57,53 +53,6 @@ const createApiInstance = (baseURL = API_BASE_URL) => {
 
 // API instances
 const api = createApiInstance();
-
-// Request queue processor
-const processQueue = async () => {
-  if (isProcessingQueue || requestQueue.length === 0) return;
-  
-  isProcessingQueue = true;
-  
-  while (requestQueue.length > 0) {
-    const request = requestQueue.shift();
-    try {
-      await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY));
-      const response = await api(request.config);
-      request.resolve(response);
-    } catch (error) {
-      request.reject(error);
-    }
-  }
-  
-  isProcessingQueue = false;
-};
-
-// Enhanced request function with queuing
-const makeRequest = async (config) => {
-  return new Promise((resolve, reject) => {
-    requestQueue.push({ config, resolve, reject });
-    processQueue();
-  });
-};
-
-// Enhanced response data extractor
-const extractResponseData = (response) => {
-  if (!response?.data) {
-    return null;
-  }
-  
-  const data = response.data;
-  
-  if (data.success !== undefined && data.data !== undefined) {
-    return data.data;
-  }
-  
-  if (data.transactions !== undefined || Array.isArray(data)) {
-    return data;
-  }
-  
-  return data;
-};
 
 // Enhanced Error handler
 const handleApiError = (error) => {
@@ -136,6 +85,14 @@ const handleApiError = (error) => {
       return serverError.error;
     }
     return 'Server error. Please try again later.';
+  }
+  
+  // Handle specific authentication errors
+  if (error.response?.status === 400 || error.response?.status === 401) {
+    if (error.response?.data?.message) {
+      return error.response.data.message;
+    }
+    return 'Invalid email or password. Please try again.';
   }
   
   if (error.response?.data?.message) {
@@ -175,545 +132,121 @@ const cache = {
   }
 };
 
-// ==================== ENHANCED TRANSACTION API ====================
-
-export const transactionAPI = {
-  // Basic CRUD operations
-  create: async (transactionData) => {
-    try {
-      console.log('💰 Creating transaction:', transactionData);
-      const response = await makeRequest({
-        method: 'post',
-        url: '/transactions',
-        data: transactionData
-      });
-      
-      const result = extractResponseData(response);
-      cache.clearAll();
-      console.log('✅ Transaction created successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error creating transaction:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getAll: async (params = {}) => {
-    try {
-      console.log('📊 Fetching transactions...', params);
-      
-      const cacheKey = `transactions_${JSON.stringify(params)}`;
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('✅ Using cached transactions');
-        return cached;
-      }
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions',
-        params
-      });
-      
-      const data = extractResponseData(response);
-      const result = Array.isArray(data) ? data : [];
-      
-      cache.set(cacheKey, result);
-      return result;
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      
-      const cacheKey = `transactions_${JSON.stringify(params)}`;
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('🔄 Using stale cached transactions due to error');
-        return cached;
-      }
-      
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getById: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/transactions/${id}`
-      });
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching transaction:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  update: async (id, data) => {
-    try {
-      const response = await makeRequest({
-        method: 'put',
-        url: `/transactions/${id}`,
-        data
-      });
-      
-      cache.clearAll();
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error updating transaction:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  delete: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'delete',
-        url: `/transactions/${id}`
-      });
-      
-      cache.clearAll();
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error deleting transaction:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  // NEW: Get shop performance data
-  getShopPerformance: async (shopId, params = {}) => {
-    try {
-      console.log(`📊 Fetching shop performance for: ${shopId}`);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: `/transactions/shop-performance/${shopId}`,
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching shop performance:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  // NEW: Get comprehensive sales data
-  getSalesAll: async (params = {}) => {
-    try {
-      console.log('📈 Fetching comprehensive sales data...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/sales/all',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching comprehensive sales data:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  // NEW: Get enhanced transactions
-  getEnhanced: async (params = {}) => {
-    try {
-      console.log('🔍 Fetching enhanced transactions...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/enhanced',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching enhanced transactions:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  // NEW: Get optimized reports (replaces multiple endpoints)
-  getOptimizedReports: async (params = {}) => {
-    try {
-      console.log('🚀 Fetching optimized reports...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/reports/optimized',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching optimized reports:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  // NEW: Enhanced cashier daily analysis
-  getCashierDailyAnalysis: async (cashierId, shopId, date = null) => {
-    try {
-      console.log('📊 Fetching enhanced cashier daily analysis...', { cashierId, shopId, date });
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/analysis/cashier-daily',
-        params: {
-          cashierId,
-          shopId,
-          date: date || dayjs().format('YYYY-MM-DD')
-        }
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching cashier daily analysis:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  // NEW: Get transaction reports data (alias for optimized reports)
-  getTransactionReportsData: async (filters = {}) => {
-    return transactionAPI.getOptimizedReports(filters);
-  },
-
-  // Legacy endpoints (maintained for backward compatibility)
-  getCashierDailyStats: async (params = {}) => {
-    try {
-      console.log('📊 Fetching cashier daily stats...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/stats/cashier-daily',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching cashier daily stats:', error);
-      return null;
-    }
-  },
-
-  getDailySalesStats: async (params = {}) => {
-    try {
-      console.log('📈 Fetching daily sales stats...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/stats/daily-sales',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching daily sales stats:', error);
-      return null;
-    }
-  },
-
-  // Report endpoints (maintained for backward compatibility)
-  getComprehensiveReport: async (params = {}) => {
-    try {
-      console.log('📊 Generating comprehensive report...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/reports/comprehensive',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error generating comprehensive report:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getSalesSummary: async (params = {}) => {
-    try {
-      console.log('📈 Generating sales summary...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/reports/sales-summary',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error generating sales summary:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getProductPerformance: async (params = {}) => {
-    try {
-      console.log('📦 Generating product performance report...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/reports/product-performance',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error generating product performance report:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getCashierPerformance: async (params = {}) => {
-    try {
-      console.log('👤 Generating cashier performance report...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/transactions/reports/cashier-performance',
-        params
-      });
-      
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error generating cashier performance report:', error);
-      throw new Error(handleApiError(error));
-    }
-  }
-};
-
-// ==================== ENHANCED CREDIT API ====================
-
-export const creditAPI = {
-  // Basic CRUD operations
-  create: async (creditData) => {
-    try {
-      console.log('💳 Creating credit record:', creditData);
-      const response = await makeRequest({
-        method: 'post',
-        url: '/credits',
-        data: creditData
-      });
-      
-      console.log('✅ Credit record created successfully');
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error creating credit record:', error);
-      throw new Error(error.response?.data?.message || 'Failed to create credit record');
-    }
-  },
-
-  getAll: async (params = {}) => {
-    try {
-      console.log('💳 Fetching credits...', params);
-      const response = await makeRequest({
-        method: 'get',
-        url: '/credits',
-        params
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching credits:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch credits');
-    }
-  },
-
-  getById: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/credits/${id}`
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching credit:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch credit');
-    }
-  },
-
-  update: async (id, updateData) => {
-    try {
-      console.log('💳 Updating credit:', { id, updateData });
-      const response = await makeRequest({
-        method: 'put',
-        url: `/credits/${id}`,
-        data: updateData
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error updating credit:', error);
-      throw new Error(error.response?.data?.message || 'Failed to update credit');
-    }
-  },
-
-  delete: async (id) => {
-    try {
-      console.log('🗑️ Deleting credit:', id);
-      const response = await makeRequest({
-        method: 'delete',
-        url: `/credits/${id}`
-      });
-      console.log('✅ Credit deleted successfully');
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error deleting credit:', error);
-      throw new Error(error.response?.data?.message || 'Failed to delete credit');
-    }
-  },
-
-  // Payment operations
-  patchPayment: async (id, paymentData) => {
-    try {
-      const response = await makeRequest({
-        method: 'patch',
-        url: `/credits/${id}/payment`,
-        data: paymentData
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error processing payment:', error);
-      throw new Error(error.response?.data?.message || 'Failed to process payment');
-    }
-  },
-
-  // NEW: Get credits by shop
-  getByShop: async (shopId) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/credits/shop/${shopId}`
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching credits by shop:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch credits by shop');
-    }
-  },
-
-  // NEW: Get shop credit summary
-  getShopCreditSummary: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/credits/shop-summary'
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching shop credit summary:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch shop credit summary');
-    }
-  },
-
-  // NEW: Get due soon credits
-  getDueSoonCredits: async (days = 2) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/credits/due-soon',
-        params: { days }
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching due soon credits:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch due soon credits');
-    }
-  },
-
-  // NEW: Send reminder
-  sendReminder: async (creditId) => {
-    try {
-      const response = await makeRequest({
-        method: 'post',
-        url: `/credits/${creditId}/send-reminder`
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error sending reminder:', error);
-      throw new Error(error.response?.data?.message || 'Failed to send reminder');
-    }
-  },
-
-  // NEW: Get cashier credit summary
-  getCashierCreditSummary: async (cashierId, shopId, date = null) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/credits/cashier-summary',
-        params: {
-          cashierId,
-          shopId,
-          date: date || dayjs().format('YYYY-MM-DD')
-        }
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching cashier credit summary:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch cashier credit summary');
-    }
-  },
-
-  // NEW: Get cashier daily credits
-  getCashierDailyCredits: async (cashierId, shopId, date = null) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/credits/cashier-daily',
-        params: {
-          cashierId,
-          shopId,
-          date: date || dayjs().format('YYYY-MM-DD')
-        }
-      });
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error fetching cashier daily credits:', error);
-      throw new Error(error.response?.data?.message || 'Failed to fetch cashier daily credits');
-    }
-  },
-
-  // Enhanced method to get credit data for reports
-  getCreditsForReports: async (params = {}) => {
-    try {
-      console.log('💳 Fetching credits for reports...', params);
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/credits',
-        params
-      });
-      
-      const data = extractResponseData(response);
-      console.log('✅ Credits for reports received:', data?.length || 0);
-      
-      return Array.isArray(data) ? data : [];
-    } catch (error) {
-      console.error('❌ Error fetching credits for reports:', error);
-      return [];
-    }
-  }
-};
-
-// ==================== AUTH API ====================
+// ==================== AUTH API SERVICE ====================
 
 export const authAPI = {
-  requestSecureCode: async (emailData) => {
+  // Cashier login with email and password
+  cashierLogin: async (credentials) => {
     try {
-      console.log('📧 Requesting secure code for:', emailData.email);
-      
-      const response = await makeRequest({
-        method: 'post',
-        url: '/auth/request-code',
-        data: emailData
+      console.log('🔐 Attempting cashier login with:', { 
+        email: credentials.email, 
+        hasPassword: !!credentials.password 
       });
+
+      // Clear any existing tokens and data first
+      localStorage.removeItem('cashierToken');
+      localStorage.removeItem('cashierData');
+      localStorage.removeItem('userToken');
+      localStorage.removeItem('userData');
+
+      let response;
+      let usedEndpoint = '';
       
+      // Try multiple possible login endpoints
+      const loginAttempts = [
+        '/auth/cashier/login',
+        '/cashier/login',
+        '/auth/login',
+        '/users/login',
+        '/login'
+      ];
+
+      for (const endpoint of loginAttempts) {
+        try {
+          console.log(`🔄 Trying login endpoint: ${endpoint}`);
+          response = await api.post(endpoint, {
+            email: credentials.email,
+            password: credentials.password,
+            role: 'cashier'
+          });
+          usedEndpoint = endpoint;
+          console.log(`✅ Success with endpoint: ${endpoint}`);
+          break;
+        } catch (endpointError) {
+          console.log(`❌ Failed with endpoint ${endpoint}:`, endpointError.response?.status);
+          continue;
+        }
+      }
+
+      if (!response) {
+        throw new Error('All login endpoints failed. Please check backend routes.');
+      }
+
+      console.log('✅ Login response received:', response.data);
+
       const data = response.data;
       
-      if (data.developmentMode && data.secureCode) {
-        console.log('🔐 DEVELOPMENT MODE - Secure code:', data.secureCode);
+      if (data.success === true || data.token || data.access_token) {
+        const user = data.user || data.data?.user || data.data || data;
+        const token = data.token || data.access_token;
+        
+        if (!token) {
+          throw new Error('No authentication token received');
+        }
+
+        // Store token and user data
+        localStorage.setItem('cashierToken', token);
+        localStorage.setItem('cashierData', JSON.stringify(user));
+        localStorage.setItem('userToken', token);
+        localStorage.setItem('userData', JSON.stringify(user));
+        
+        cache.clearAll();
+        
+        console.log('✅ Cashier login successful:', {
+          user: { id: user.id, email: user.email, role: user.role },
+          tokenReceived: !!token,
+          endpointUsed: usedEndpoint
+        });
+        
+        return {
+          success: true,
+          user: user,
+          token: token,
+          message: data.message || 'Login successful'
+        };
+      } else {
+        throw new Error(data.message || 'Login failed: Invalid response structure');
+      }
+    } catch (error) {
+      console.error('❌ Cashier login error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      
+      // Clear any partial data on error
+      localStorage.removeItem('cashierToken');
+      localStorage.removeItem('cashierData');
+      
+      let errorMessage = handleApiError(error);
+      
+      if (error.response?.status === 404) {
+        errorMessage = 'Login service unavailable. Please contact administrator.';
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Invalid email or password. Please try again.';
+      } else if (error.message.includes('All login endpoints failed')) {
+        errorMessage = 'Cannot connect to authentication service. Please check if the server is running.';
       }
       
-      console.log('✅ Secure code request successful');
-      return data;
+      throw new Error(errorMessage);
+    }
+  },
+
+  // Admin/secure code login
+  requestSecureCode: async (emailData) => {
+    try {
+      const response = await api.post('/auth/request-code', emailData);
+      return response.data;
     } catch (error) {
       console.error('❌ Secure code request error:', error);
       throw new Error(handleApiError(error));
@@ -722,30 +255,10 @@ export const authAPI = {
 
   verifySecureCode: async (codeData) => {
     try {
-      console.log('🔐 Verifying secure code for:', codeData.email);
-      
-      const response = await makeRequest({
-        method: 'post',
-        url: '/auth/verify-code',
-        data: codeData
-      });
+      const response = await api.post('/auth/verify-code', codeData);
       
       const data = response.data;
-      let user = null;
-      
-      if (data.user) {
-        user = data.user;
-      } else if (data.data && data.data.user) {
-        user = data.data.user;
-      } else if (data.data && (data.data.email || data.data.role)) {
-        user = data.data;
-      } else if (data && (data.email || data.role)) {
-        user = data;
-      }
-      
-      if (!user) {
-        throw new Error('No user data received from server');
-      }
+      const user = data.user || data.data?.user || data.data || data;
       
       if (user.role === 'admin') {
         localStorage.setItem('userData', JSON.stringify(user));
@@ -770,812 +283,431 @@ export const authAPI = {
     }
   },
 
-  cashierLogin: async (credentials) => {
-    try {
-      console.log('👤 Attempting cashier login...');
-      console.log('📧 Email:', credentials.email);
-      
-      const response = await makeRequest({
-        method: 'post',
-        url: '/auth/login',
-        data: {
-          email: credentials.email,
-          password: credentials.password,
-          userType: 'cashier'
-        }
-      });
-      
-      const data = response.data;
-      console.log('✅ Raw login response:', data);
-      
-      if (data.success === true && data.user) {
-        const user = data.user;
-        
-        const allowedRoles = ['cashier', 'manager', 'admin'];
-        if (!user.role || !allowedRoles.includes(user.role)) {
-          throw new Error('Access denied. Cashier privileges required.');
-        }
-        
-        if (user.status === 'inactive') {
-          throw new Error('Cashier account is inactive. Please contact administrator.');
-        }
-
-        localStorage.setItem('cashierData', JSON.stringify(user));
-        cache.clearAll();
-        console.log('✅ Cashier login successful');
-        return data;
-      } else {
-        throw new Error(data.message || 'Login failed. Please check your credentials.');
-      }
-    } catch (error) {
-      console.error('❌ Cashier login error:', error);
-      
-      if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
-        throw new Error('Cannot connect to server. Please check if backend is running on port 5001.');
-      }
-      
-      if (error.response?.status === 401) {
-        throw new Error('Invalid email or password. Please try again.');
-      }
-      
-      if (error.response?.status === 403) {
-        throw new Error('Cashier account is inactive. Please contact administrator.');
-      }
-      
-      if (error.response?.status === 404) {
-        throw new Error('Cashier account not found. Please contact administrator.');
-      }
-      
-      throw new Error(error.response?.data?.message || error.message || 'Login failed');
-    }
-  },
-
-  adminLogin: async (credentials) => {
-    throw new Error('Admin login now uses secure code authentication. Please use requestSecureCode and verifySecureCode methods.');
-  },
-
-  login: async (credentials, userType = 'cashier') => {
-    if (userType === 'admin') {
-      throw new Error('Admin login now uses secure code authentication.');
-    }
-    return authAPI.cashierLogin(credentials);
-  },
-
   logout: () => {
     localStorage.removeItem('userData');
     localStorage.removeItem('adminData');
     localStorage.removeItem('cashierData');
     localStorage.removeItem('adminToken');
     localStorage.removeItem('userToken');
+    localStorage.removeItem('cashierToken');
     cache.clearAll();
-    console.log('✅ Logout completed - user data cleared');
+    console.log('✅ Logout completed - all user data cleared');
   },
 
-  getProfile: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/auth/me'
-      });
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  testConnection: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/health'
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Connection test failed:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  checkUserExists: async (email) => {
-    try {
-      const response = await makeRequest({
-        method: 'post',
-        url: '/auth/request-code',
-        data: { email }
-      });
-      
-      return { exists: true, message: 'User exists' };
-    } catch (error) {
-      if (error.response?.status === 404) {
-        return { exists: false, message: 'No account found with this email' };
+  // Utility function to check if cashier is logged in
+  isCashierLoggedIn: () => {
+    const token = localStorage.getItem('cashierToken') || localStorage.getItem('userToken');
+    const cashierData = localStorage.getItem('cashierData') || localStorage.getItem('userData');
+    
+    if (token && cashierData) {
+      try {
+        const user = JSON.parse(cashierData);
+        return user.role === 'cashier';
+      } catch (error) {
+        return false;
       }
-      throw new Error(handleApiError(error));
+    }
+    return false;
+  },
+
+  // Get current cashier data
+  getCurrentCashier: () => {
+    try {
+      const cashierData = localStorage.getItem('cashierData') || localStorage.getItem('userData');
+      if (cashierData) {
+        const user = JSON.parse(cashierData);
+        return user.role === 'cashier' ? user : null;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error parsing cashier data:', error);
+      return null;
     }
   }
 };
 
-// ==================== PRODUCT API ====================
+// ==================== ENHANCED UNIFIED API SERVICE ====================
 
-export const productAPI = {
-  getAll: async (params = {}) => {
+export const unifiedAPI = {
+  getCombinedTransactions: async (params = {}) => {
     try {
-      console.log('🛍️ Fetching products...');
+      console.log('🚀 Fetching enhanced combined transactions with credit normalization...', params);
       
-      const cacheKey = `products_${JSON.stringify(params)}`;
+      const cacheKey = `combined_transactions_${JSON.stringify(params)}`;
       const cached = cache.get(cacheKey);
       if (cached) {
-        console.log('✅ Using cached products');
+        console.log('✅ Using cached combined transactions');
         return cached;
       }
       
-      const response = await makeRequest({
-        method: 'get',
-        url: '/products',
-        params
+      const response = await api.get('/transactions/combined', { params });
+      
+      const data = response.data?.data || response.data;
+      
+      console.log('📊 Raw API Response Structure:', {
+        hasSummary: !!data.summary,
+        hasFinancialStats: !!data.financialStats,
+        hasEnhancedStats: !!data.enhancedStats,
+        keys: Object.keys(data),
+        transactionsCount: data.transactions?.length || data.salesWithProfit?.length || 0
       });
-      
-      const data = extractResponseData(response);
-      const products = Array.isArray(data) ? data : [];
-      
-      cache.set(cacheKey, products);
-      console.log(`✅ Found ${products.length} products`);
-      return products;
-    } catch (error) {
-      console.error('❌ Error fetching products:', error);
-      
-      const cacheKey = `products_${JSON.stringify(params)}`;
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('🔄 Using stale cached products due to error');
-        return cached;
-      }
-      
-      return [];
-    }
-  },
 
-  getById: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/products/${id}`
-      });
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching product:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
+      // Extract transactions from various possible locations in the response
+      const transactions = data.transactions || 
+                          data.salesWithProfit || 
+                          data.filteredTransactions || 
+                          data.comprehensiveData?.transactions || 
+                          [];
 
-  create: async (productData) => {
-    try {
-      console.log('📦 Creating product:', productData);
-      const response = await makeRequest({
-        method: 'post',
-        url: '/products',
-        data: productData
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('products');
-      console.log('✅ Product created successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error creating product:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
+      // Extract other data with proper fallbacks
+      const expenses = data.expenses || data.comprehensiveData?.expenses || [];
+      const credits = data.credits || data.comprehensiveData?.credits || [];
+      const products = data.products || data.comprehensiveData?.products || [];
+      const shops = data.shops || data.comprehensiveData?.shops || [];
+      const cashiers = data.cashiers || data.comprehensiveData?.cashiers || [];
 
-  update: async (id, data) => {
-    try {
-      console.log('📦 Updating product:', { id, data });
-      
-      const response = await makeRequest({
-        method: 'put',
-        url: `/products/${id}`,
-        data
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('products');
-      console.log('✅ Product updated successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error updating product:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
+      // ENHANCED: Normalize credit data for consistency
+      const normalizedCredits = credits.map(credit => ({
+        ...credit,
+        // Ensure consistent field names and calculations
+        totalAmount: CalculationUtils.safeNumber(credit.totalAmount),
+        amountPaid: CalculationUtils.safeNumber(credit.amountPaid),
+        balanceDue: CalculationUtils.safeNumber(credit.balanceDue) || 
+                   Math.max(0, CalculationUtils.safeNumber(credit.totalAmount) - CalculationUtils.safeNumber(credit.amountPaid)),
+        // Normalize status
+        status: credit.status || 'pending',
+        // Ensure consistent customer information
+        customerName: credit.customerName || 'Unknown Customer',
+        customerPhone: credit.customerPhone || '',
+        // Normalize shop information
+        shopName: credit.shopName || (credit.shop && typeof credit.shop === 'object' ? credit.shop.name : 'Unknown Shop'),
+        shopId: credit.shopId || (credit.shop && typeof credit.shop === 'object' ? credit.shop._id : null),
+        // Normalize cashier information
+        cashierName: credit.cashierName || 'Unknown Cashier',
+        cashierId: credit.cashierId || null,
+        // Add calculated fields
+        collectionRate: CalculationUtils.safeNumber(credit.totalAmount) > 0 ? 
+          (CalculationUtils.safeNumber(credit.amountPaid) / CalculationUtils.safeNumber(credit.totalAmount)) * 100 : 0,
+        isOverdue: credit.dueDate && new Date(credit.dueDate) < new Date() && 
+                  CalculationUtils.safeNumber(credit.balanceDue) > 0
+      }));
 
-  bulkUpdateStock: async (data) => {
-    try {
-      console.log('📦 Bulk updating product stock:', data);
-      
-      const response = await makeRequest({
-        method: 'patch',
-        url: '/products/bulk-stock',
-        data
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('products');
-      console.log('✅ Bulk stock update successful');
-      return result;
-    } catch (error) {
-      console.error('❌ Error in bulk stock update:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  delete: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'delete',
-        url: `/products/${id}`
-      });
-      
-      cache.clear('products');
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error deleting product:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getProductsForReports: async () => {
-    try {
-      console.log('📦 Fetching products for reports...');
-      
-      const optimizedData = await transactionAPI.getOptimizedReports({});
-      const products = optimizedData.comprehensiveData?.products || [];
-      
-      console.log('✅ Products for reports received:', products.length);
-      return Array.isArray(products) ? products : [];
-    } catch (error) {
-      console.error('❌ Error fetching products for reports:', error);
-      return [];
-    }
-  }
-};
-
-// ==================== SHOP API ====================
-
-export const shopAPI = {
-  getAll: async (params = {}) => {
-    try {
-      console.log('🏪 Fetching shops...');
-      
-      const cacheKey = 'shops';
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('✅ Using cached shops');
-        return cached;
-      }
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/shops',
-        params
-      });
-      
-      const data = extractResponseData(response);
-      const shops = Array.isArray(data) ? data : [];
-      
-      cache.set(cacheKey, shops);
-      console.log(`✅ Found ${shops.length} shops`);
-      return shops;
-    } catch (error) {
-      console.error('❌ Error fetching shops:', error);
-      
-      const cached = cache.get('shops');
-      if (cached) {
-        console.log('🔄 Using stale cached shops due to error');
-        return cached;
-      }
-      
-      return [];
-    }
-  },
-
-  getById: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/shops/${id}`
-      });
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching shop:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  create: async (shopData) => {
-    try {
-      console.log('🏪 Creating shop:', shopData);
-      const response = await makeRequest({
-        method: 'post',
-        url: '/shops',
-        data: shopData
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('shops');
-      console.log('✅ Shop created successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error creating shop:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  update: async (id, data) => {
-    try {
-      const response = await makeRequest({
-        method: 'put',
-        url: `/shops/${id}`,
-        data
-      });
-      
-      cache.clear('shops');
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error updating shop:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  delete: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'delete',
-        url: `/shops/${id}`
-      });
-      
-      cache.clear('shops');
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error deleting shop:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getShopsForReports: async () => {
-    try {
-      console.log('🏪 Fetching shops for reports...');
-      
-      const optimizedData = await transactionAPI.getOptimizedReports({});
-      const shops = optimizedData.shops || [];
-      
-      console.log('✅ Shops for reports received:', shops.length);
-      return Array.isArray(shops) ? shops : [];
-    } catch (error) {
-      console.error('❌ Error fetching shops for reports:', error);
-      return [];
-    }
-  }
-};
-
-// ==================== CASHIER API ====================
-
-export const cashierAPI = {
-  getAll: async (params = {}) => {
-    try {
-      console.log('👤 Fetching cashiers...');
-      
-      const cacheKey = 'cashiers';
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('✅ Using cached cashiers');
-        return cached;
-      }
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/cashiers',
-        params
-      });
-      
-      const data = extractResponseData(response);
-      const cashiers = Array.isArray(data) ? data : [];
-      
-      cache.set(cacheKey, cashiers);
-      console.log(`✅ Found ${cashiers.length} cashiers`);
-      return cashiers;
-    } catch (error) {
-      console.error('❌ Error fetching cashiers:', error);
-      
-      const cached = cache.get('cashiers');
-      if (cached) {
-        console.log('🔄 Using stale cached cashiers due to error');
-        return cached;
-      }
-      
-      return [];
-    }
-  },
-
-  getById: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/cashiers/${id}`
-      });
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching cashier:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  create: async (cashierData) => {
-    try {
-      console.log('👤 Creating cashier:', cashierData);
-      const response = await makeRequest({
-        method: 'post',
-        url: '/cashiers',
-        data: cashierData
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('cashiers');
-      console.log('✅ Cashier created successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error creating cashier:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  update: async (id, data) => {
-    try {
-      const response = await makeRequest({
-        method: 'put',
-        url: `/cashiers/${id}`,
-        data
-      });
-      
-      cache.clear('cashiers');
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error updating cashier:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  patch: async (id, data) => {
-    try {
-      const response = await makeRequest({
-        method: 'patch',
-        url: `/cashiers/${id}`,
-        data
-      });
-      
-      cache.clear('cashiers');
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error patching cashier:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  delete: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'delete',
-        url: `/cashiers/${id}`
-      });
-      
-      cache.clear('cashiers');
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error deleting cashier:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getCashiersForReports: async () => {
-    try {
-      console.log('👤 Fetching cashiers for reports...');
-      
-      const optimizedData = await transactionAPI.getOptimizedReports({});
-      const cashiers = optimizedData.cashiers || [];
-      
-      console.log('✅ Cashiers for reports received:', cashiers.length);
-      return Array.isArray(cashiers) ? cashiers : [];
-    } catch (error) {
-      console.error('❌ Error fetching cashiers for reports:', error);
-      return [];
-    }
-  }
-};
-
-// ==================== EXPENSE API ====================
-
-export const expenseAPI = {
-  getAll: async (params = {}) => {
-    try {
-      console.log('💰 Fetching expenses...');
-      
-      const cacheKey = `expenses_${JSON.stringify(params)}`;
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('✅ Using cached expenses');
-        return cached;
-      }
-      
-      const response = await makeRequest({
-        method: 'get',
-        url: '/expenses',
-        params
-      });
-      
-      const data = extractResponseData(response);
-      const expenses = Array.isArray(data) ? data : [];
-      
-      cache.set(cacheKey, expenses);
-      console.log(`✅ Found ${expenses.length} expenses`);
-      return expenses;
-    } catch (error) {
-      console.error('❌ Error fetching expenses:', error);
-      
-      const cacheKey = `expenses_${JSON.stringify(params)}`;
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        console.log('🔄 Using stale cached expenses due to error');
-        return cached;
-      }
-      
-      return [];
-    }
-  },
-
-  getById: async (id) => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: `/expenses/${id}`
-      });
-      return extractResponseData(response);
-    } catch (error) {
-      console.error('Error fetching expense:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  create: async (expenseData) => {
-    try {
-      console.log('💰 Creating expense:', expenseData);
-      
-      const response = await makeRequest({
-        method: 'post',
-        url: '/expenses',
-        data: expenseData
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('expenses');
-      console.log('✅ Expense created successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error creating expense:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  update: async (id, data) => {
-    try {
-      console.log('💰 Updating expense:', { id, data });
-      
-      const response = await makeRequest({
-        method: 'put',
-        url: `/expenses/${id}`,
-        data
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('expenses');
-      console.log('✅ Expense updated successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error updating expense:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  delete: async (id) => {
-    try {
-      console.log('🗑️ Deleting expense:', id);
-      
-      const response = await makeRequest({
-        method: 'delete',
-        url: `/expenses/${id}`
-      });
-      
-      const result = extractResponseData(response);
-      cache.clear('expenses');
-      console.log('✅ Expense deleted successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Error deleting expense:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getExpensesForReports: async (params = {}) => {
-    try {
-      console.log('💰 Fetching expenses for reports...', params);
-      
-      const optimizedData = await transactionAPI.getOptimizedReports(params);
-      const expenses = optimizedData.comprehensiveData?.expenses || [];
-      
-      console.log('✅ Expenses for reports received:', expenses.length);
-      return Array.isArray(expenses) ? expenses : [];
-    } catch (error) {
-      console.error('❌ Error fetching expenses for reports:', error);
-      return [];
-    }
-  }
-};
-
-// ==================== SYSTEM API ====================
-
-export const systemAPI = {
-  health: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/health'
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  testDatabase: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/api/debug/database'
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getRoutes: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/api/debug/routes'
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  getEmailStatus: async () => {
-    try {
-      const response = await makeRequest({
-        method: 'get',
-        url: '/api/debug/email-status'
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(handleApiError(error));
-    }
-  }
-};
-
-// ==================== SETUP API ====================
-
-export const setupAPI = {
-  createSampleData: async () => {
-    try {
-      console.log('🔄 Creating sample data...');
-      const response = await makeRequest({
-        method: 'post',
-        url: '/api/setup/sample-data'
-      });
-      
-      cache.clearAll();
-      return response.data;
-    } catch (error) {
-      console.error('Error creating sample data:', error);
-      throw new Error(handleApiError(error));
-    }
-  },
-
-  checkDatabaseStatus: async () => {
-    try {
-      const optimizedData = await transactionAPI.getOptimizedReports({});
-      
-      return {
-        hasData: (optimizedData.comprehensiveData?.transactions?.length || 0) > 0,
-        counts: {
-          products: optimizedData.comprehensiveData?.products?.length || 0,
-          shops: optimizedData.shops?.length || 0,
-          cashiers: optimizedData.cashiers?.length || 0,
-          expenses: optimizedData.comprehensiveData?.expenses?.length || 0,
-          transactions: optimizedData.comprehensiveData?.transactions?.length || 0,
-          credits: optimizedData.credits?.length || 0
+      // ENHANCED: Normalize transaction data for consistency
+      const normalizedTransactions = transactions.map(transaction => {
+        const isCredit = transaction.paymentMethod === 'credit' || 
+                        transaction.isCreditTransaction === true ||
+                        transaction.status === 'credit';
+        
+        // Calculate consistent credit metrics
+        const totalAmount = CalculationUtils.safeNumber(transaction.totalAmount);
+        const amountPaid = CalculationUtils.safeNumber(transaction.amountPaid);
+        const recognizedRevenue = CalculationUtils.safeNumber(transaction.recognizedRevenue);
+        const outstandingRevenue = CalculationUtils.safeNumber(transaction.outstandingRevenue);
+        
+        let normalizedCreditData = {};
+        
+        if (isCredit) {
+          // Ensure consistent credit calculations
+          const calculatedAmountPaid = amountPaid || recognizedRevenue || 0;
+          const calculatedOutstanding = outstandingRevenue || Math.max(0, totalAmount - calculatedAmountPaid);
+          const calculatedRecognized = recognizedRevenue || calculatedAmountPaid;
+          
+          // Calculate credit status
+          let creditStatus = transaction.creditStatus;
+          if (!creditStatus) {
+            if (calculatedOutstanding <= 0) {
+              creditStatus = 'paid';
+            } else if (calculatedAmountPaid > 0) {
+              creditStatus = 'partially_paid';
+            } else {
+              creditStatus = 'pending';
+            }
+            
+            // Check if overdue
+            if (transaction.dueDate && new Date(transaction.dueDate) < new Date() && calculatedOutstanding > 0) {
+              creditStatus = 'overdue';
+            }
+          }
+          
+          normalizedCreditData = {
+            isCreditTransaction: true,
+            amountPaid: calculatedAmountPaid,
+            recognizedRevenue: calculatedRecognized,
+            outstandingRevenue: calculatedOutstanding,
+            creditStatus: creditStatus,
+            collectionRate: totalAmount > 0 ? (calculatedRecognized / totalAmount) * 100 : 0
+          };
+        } else {
+          normalizedCreditData = {
+            isCreditTransaction: false,
+            amountPaid: totalAmount,
+            recognizedRevenue: totalAmount,
+            outstandingRevenue: 0,
+            creditStatus: null,
+            collectionRate: 100
+          };
         }
-      };
-    } catch (error) {
-      console.error('Error checking database status:', error);
-      return { 
-        hasData: false, 
-        counts: { 
-          products: 0, 
-          shops: 0, 
-          cashiers: 0, 
-          expenses: 0,
-          transactions: 0,
-          credits: 0
-        } 
-      };
-    }
-  }
-};
+        
+        return {
+          ...transaction,
+          // Normalize core financial data
+          totalAmount: totalAmount,
+          cost: CalculationUtils.safeNumber(transaction.cost),
+          profit: CalculationUtils.safeNumber(transaction.profit),
+          profitMargin: CalculationUtils.safeNumber(transaction.profitMargin),
+          // Add normalized credit data
+          ...normalizedCreditData,
+          // Normalize display data
+          displayDate: transaction.displayDate || 
+                      new Date(transaction.saleDate || transaction.createdAt).toLocaleString('en-KE'),
+          // Normalize shop information
+          shopName: transaction.shopName || 
+                   (transaction.shop && typeof transaction.shop === 'object' ? transaction.shop.name : 'Unknown Shop'),
+          // Normalize cashier information
+          cashierName: transaction.cashierName || 'Unknown Cashier',
+          // Add validation flag
+          _isValid: true,
+          _normalizedAt: new Date().toISOString()
+        };
+      });
 
-// ==================== REPORT API ====================
+      console.log('📈 Normalized data counts:', {
+        transactions: normalizedTransactions.length,
+        creditTransactions: normalizedTransactions.filter(t => t.isCreditTransaction).length,
+        completeTransactions: normalizedTransactions.filter(t => !t.isCreditTransaction).length,
+        expenses: expenses.length,
+        credits: normalizedCredits.length,
+        products: products.length,
+        shops: shops.length,
+        cashiers: cashiers.length
+      });
 
-export const reportAPI = {
-  getDashboardData: async (filters = {}) => {
-    try {
-      console.log('📈 Fetching complete dashboard data...', filters);
+      // ENHANCED: Calculate consistent financial stats
+      const creditTransactions = normalizedTransactions.filter(t => t.isCreditTransaction);
+      const totalCreditSales = creditTransactions.reduce((sum, t) => sum + t.totalAmount, 0);
+      const recognizedCreditRevenue = creditTransactions.reduce((sum, t) => sum + t.recognizedRevenue, 0);
+      const outstandingCredit = creditTransactions.reduce((sum, t) => sum + t.outstandingRevenue, 0);
       
-      const transactionReportsData = await transactionAPI.getTransactionReportsData(filters);
-      
-      const creditStats = {
-        totalCredits: transactionReportsData.credits?.length || 0,
-        totalCreditAmount: transactionReportsData.credits?.reduce((sum, c) => sum + (c.totalAmount || 0), 0) || 0,
-        totalAmountPaid: transactionReportsData.credits?.reduce((sum, c) => sum + (c.amountPaid || 0), 0) || 0,
-        totalBalanceDue: transactionReportsData.credits?.reduce((sum, c) => sum + (c.balanceDue || 0), 0) || 0,
-        overdueCredits: transactionReportsData.credits?.filter(c => 
-          c.dueDate && new Date(c.dueDate) < new Date() && c.balanceDue > 0
-        ).length || 0,
-        collectionRate: transactionReportsData.credits?.length > 0 ? 
-          (transactionReportsData.credits.reduce((sum, c) => sum + (c.amountPaid || 0), 0) / 
-           transactionReportsData.credits.reduce((sum, c) => sum + (c.totalAmount || 0), 0)) * 100 : 0
-      };
-      
-      const dashboardData = {
-        ...transactionReportsData,
-        creditStats,
-        loadedAt: new Date().toISOString(),
-        dataSources: {
-          transactions: transactionReportsData.totalCount,
-          shops: transactionReportsData.shops.length,
-          cashiers: transactionReportsData.cashiers.length,
-          products: transactionReportsData.comprehensiveData.products.length,
-          credits: transactionReportsData.credits.length,
-          expenses: transactionReportsData.comprehensiveData.expenses.length
-        }
-      };
-      
-      console.log('✅ Dashboard data loaded successfully:', dashboardData.dataSources);
-      return dashboardData;
-      
-    } catch (error) {
-      console.error('❌ Error loading dashboard data:', error);
-      
-      return {
-        comprehensiveReport: {
-          summary: {},
-          timeSeries: [],
-          paymentMethods: [],
-          cashierPerformance: [],
-          productPerformance: [],
-          rawTransactions: []
+      // Also calculate from credits data for verification
+      const totalCreditFromCredits = normalizedCredits.reduce((sum, c) => sum + c.totalAmount, 0);
+      const outstandingFromCredits = normalizedCredits.reduce((sum, c) => sum + c.balanceDue, 0);
+
+      // Use the maximum value to ensure consistency
+      const consistentCreditSales = Math.max(totalCreditSales, totalCreditFromCredits);
+      const consistentOutstanding = Math.max(outstandingCredit, outstandingFromCredits);
+
+      // Enhanced data structure with consistent calculations
+      const enhancedData = {
+        // Core normalized data arrays
+        transactions: normalizedTransactions,
+        salesWithProfit: normalizedTransactions,
+        filteredTransactions: normalizedTransactions,
+        expenses: expenses,
+        credits: normalizedCredits,
+        products: products,
+        shops: shops,
+        cashiers: cashiers,
+        
+        // Enhanced statistics and summaries with consistent credit calculations
+        summary: {
+          ...(data.summary || CalculationUtils.getDefaultStats()),
+          // Override with consistent credit calculations
+          creditSales: consistentCreditSales,
+          outstandingCredit: consistentOutstanding,
+          totalCreditGiven: consistentCreditSales,
+          recognizedCreditRevenue: recognizedCreditRevenue,
+          creditSalesCount: Math.max(creditTransactions.length, normalizedCredits.length),
+          creditCollectionRate: consistentCreditSales > 0 ? 
+            ((consistentCreditSales - consistentOutstanding) / consistentCreditSales) * 100 : 0
         },
+        
+        financialStats: {
+          ...(data.financialStats || data.summary || CalculationUtils.getDefaultStats()),
+          // Ensure consistent credit metrics
+          creditSales: consistentCreditSales,
+          outstandingCredit: consistentOutstanding,
+          totalCreditGiven: consistentCreditSales,
+          recognizedCreditRevenue: recognizedCreditRevenue,
+          creditSalesCount: Math.max(creditTransactions.length, normalizedCredits.length),
+          creditCollectionRate: consistentCreditSales > 0 ? 
+            ((consistentCreditSales - consistentOutstanding) / consistentCreditSales) * 100 : 0
+        },
+        
+        enhancedStats: data.enhancedStats || {
+          salesWithProfit: normalizedTransactions,
+          financialStats: data.summary || data.financialStats || CalculationUtils.getDefaultStats()
+        },
+        
+        comprehensiveData: data.comprehensiveData || {
+          transactions: normalizedTransactions,
+          expenses: expenses,
+          products: products,
+          credits: normalizedCredits,
+          summary: data.summary || CalculationUtils.getDefaultStats()
+        },
+        
+        // Performance data
+        performance: data.performance || {
+          topProducts: [],
+          shopPerformance: [],
+          topCashiers: []
+        },
+        
+        // Add consistency metadata
+        _metadata: {
+          processedAt: new Date().toISOString(),
+          dataConsistency: {
+            creditTransactionsFromTransactions: creditTransactions.length,
+            creditsFromCredits: normalizedCredits.length,
+            totalCreditSalesFromTransactions: totalCreditSales,
+            totalCreditSalesFromCredits: totalCreditFromCredits,
+            outstandingFromTransactions: outstandingCredit,
+            outstandingFromCredits: outstandingFromCredits,
+            consistencyScore: Math.abs(totalCreditSales - totalCreditFromCredits) < 1 ? 'HIGH' : 
+                             Math.abs(totalCreditSales - totalCreditFromCredits) < 10 ? 'MEDIUM' : 'LOW'
+          },
+          normalizationApplied: true
+        }
+      };
+
+      console.log('✅ Enhanced data structure created with credit normalization:', {
+        transactionsCount: enhancedData.transactions.length,
+        creditTransactions: creditTransactions.length,
+        creditsCount: normalizedCredits.length,
+        totalCreditSales: consistentCreditSales,
+        outstandingCredit: consistentOutstanding,
+        consistency: enhancedData._metadata.dataConsistency.consistencyScore
+      });
+
+      cache.set(cacheKey, enhancedData);
+      console.log('✅ Combined transactions data received and enhanced with credit normalization');
+      return enhancedData;
+    } catch (error) {
+      console.error('❌ Error fetching combined transactions:', error);
+      
+      // Return comprehensive fallback data with proper structure
+      const fallbackData = {
+        transactions: [],
+        salesWithProfit: [],
+        filteredTransactions: [],
+        shops: [],
+        cashiers: [],
+        products: [],
+        expenses: [],
+        credits: [],
+        summary: CalculationUtils.getDefaultStats(),
+        financialStats: CalculationUtils.getDefaultStats(),
+        enhancedStats: {
+          salesWithProfit: [],
+          financialStats: CalculationUtils.getDefaultStats()
+        },
+        comprehensiveData: {
+          transactions: [],
+          expenses: [],
+          products: [],
+          credits: [],
+          summary: CalculationUtils.getDefaultStats()
+        },
+        _metadata: {
+          processedAt: new Date().toISOString(),
+          dataConsistency: {
+            creditTransactionsFromTransactions: 0,
+            creditsFromCredits: 0,
+            totalCreditSalesFromTransactions: 0,
+            totalCreditSalesFromCredits: 0,
+            outstandingFromTransactions: 0,
+            outstandingFromCredits: 0,
+            consistencyScore: 'N/A (Fallback)'
+          },
+          normalizationApplied: false,
+          error: true
+        },
+        error: handleApiError(error)
+      };
+      
+      console.log('🔄 Returning fallback data structure');
+      return fallbackData;
+    }
+  },
+
+  // ENHANCED: Create transaction with stock reduction and credit normalization
+  createTransaction: async (transactionData) => {
+    try {
+      console.log('💰 Creating transaction with stock reduction:', transactionData);
+      const response = await api.post('/transactions', transactionData);
+      cache.clearAll();
+      
+      // Normalize the response data
+      const createdTransaction = response.data?.data || response.data;
+      const normalizedTransaction = CalculationUtils.processSingleTransaction(createdTransaction);
+      
+      console.log('✅ Transaction created successfully with stock reduction');
+      return normalizedTransaction;
+    } catch (error) {
+      console.error('❌ Error creating transaction:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  // ENHANCED: Combined reports with credit normalization
+  getCombinedReports: async (params = {}) => {
+    try {
+      console.log('📊 Generating combined reports with credit normalization...', params);
+      
+      const cacheKey = `combined_reports_${JSON.stringify(params)}`;
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        console.log('✅ Using cached combined reports');
+        return cached;
+      }
+      
+      // Use the normalized transactions data as base
+      const transactionsData = await unifiedAPI.getCombinedTransactions(params);
+      
+      const enhancedReports = {
+        ...transactionsData,
+        salesSummary: transactionsData.salesSummary || {
+          financialStats: transactionsData.financialStats,
+          topProducts: transactionsData.performance?.topProducts || [],
+          topCashiers: transactionsData.performance?.topCashiers || []
+        },
+        productPerformance: transactionsData.productPerformance || {
+          products: transactionsData.products,
+          summary: {}
+        },
+        cashierPerformance: transactionsData.cashierPerformance || {
+          cashiers: transactionsData.cashiers,
+          summary: {}
+        },
+        comprehensiveReport: transactionsData.comprehensiveReport || {
+          summary: transactionsData.financialStats,
+          transactions: transactionsData.transactions,
+          expenses: transactionsData.expenses,
+          products: transactionsData.products,
+          credits: transactionsData.credits
+        },
+        // Add credit-specific analysis
+        creditAnalysis: await unifiedAPI.getCombinedCreditAnalysis(params)
+      };
+      
+      cache.set(cacheKey, enhancedReports);
+      console.log('✅ Combined reports generated with credit normalization');
+      return enhancedReports;
+    } catch (error) {
+      console.error('❌ Error generating combined reports:', error);
+      
+      const cacheKey = `combined_reports_${JSON.stringify(params)}`;
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        console.log('🔄 Using stale cached reports due to error');
+        return cached;
+      }
+      
+      return {
         salesSummary: {
-          summary: {},
-          dailyBreakdown: [],
-          recentTransactions: []
+          financialStats: CalculationUtils.getDefaultStats(),
+          topProducts: [],
+          topCashiers: []
         },
         productPerformance: {
           products: [],
@@ -1585,141 +717,690 @@ export const reportAPI = {
           cashiers: [],
           summary: {}
         },
-        comprehensiveData: {
+        comprehensiveReport: {
+          summary: CalculationUtils.getDefaultStats(),
           transactions: [],
           expenses: [],
           products: [],
-          summary: {},
-          stats: {}
+          credits: []
         },
-        enhancedStats: {
-          salesWithProfit: [],
-          financialStats: {
-            totalSales: 0,
-            totalProfit: 0,
-            totalExpenses: 0,
-            netProfit: 0,
-            profitMargin: 0,
-            transactionCount: 0,
-            averageTransaction: 0,
-            totalCredits: 0,
-            totalCreditAmount: 0,
-            totalAmountPaid: 0,
-            totalBalanceDue: 0,
-            overdueCredits: 0,
-            creditCollectionRate: 0
-          }
+        creditAnalysis: {
+          totalCreditSales: 0,
+          outstandingCredit: 0,
+          creditSalesCount: 0
         },
-        filteredTransactions: [],
-        shops: [],
-        cashiers: [],
-        products: [],
-        credits: [],
-        expenses: [],
-        creditStats: {
-          totalCredits: 0,
-          totalCreditAmount: 0,
-          totalAmountPaid: 0,
-          totalBalanceDue: 0,
-          overdueCredits: 0,
-          collectionRate: 0
-        },
-        filters,
-        totalCount: 0,
-        filteredCount: 0,
-        loadedAt: new Date().toISOString(),
-        dataSources: {
-          transactions: 0,
-          shops: 0,
-          cashiers: 0,
-          products: 0,
-          credits: 0,
-          expenses: 0
-        },
-        success: false,
         error: handleApiError(error)
       };
     }
   },
-  
-  exportReport: async (data, format = 'csv') => {
+
+  // ENHANCED: Combined credit analysis with data consistency
+  getCombinedCreditAnalysis: async (params = {}) => {
     try {
-      console.log(`📤 Exporting report as ${format}...`);
+      console.log('💳 Fetching combined credit analysis with consistency...', params);
       
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const cacheKey = `credit_analysis_${JSON.stringify(params)}`;
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        console.log('✅ Using cached credit analysis');
+        return cached;
+      }
       
-      const timestamp = dayjs().format('YYYY-MM-DD_HH-mm-ss');
-      const filename = `transaction-report-${timestamp}.${format}`;
+      // Get normalized data from unified endpoint
+      const transactionsData = await unifiedAPI.getCombinedTransactions(params);
       
-      console.log('✅ Report export prepared:', filename);
+      // Use the already normalized data
+      const creditTransactions = transactionsData.transactions?.filter(t => t.isCreditTransaction) || [];
+      const credits = transactionsData.credits || [];
       
-      return {
-        success: true,
-        filename,
-        format,
-        timestamp: new Date().toISOString(),
-        dataSize: JSON.stringify(data).length
+      // Calculate metrics using normalized data
+      const totalCreditSales = transactionsData.financialStats?.creditSales || 
+                              creditTransactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+      
+      const recognizedCreditRevenue = transactionsData.financialStats?.recognizedCreditRevenue ||
+                                    creditTransactions.reduce((sum, t) => sum + (t.recognizedRevenue || 0), 0);
+      
+      const outstandingCredit = transactionsData.financialStats?.outstandingCredit ||
+                              creditTransactions.reduce((sum, t) => sum + (t.outstandingRevenue || 0), 0);
+      
+      // Calculate credit status breakdown from normalized data
+      const statusBreakdown = {
+        pending: creditTransactions.filter(t => t.creditStatus === 'pending').length,
+        partially_paid: creditTransactions.filter(t => t.creditStatus === 'partially_paid').length,
+        paid: creditTransactions.filter(t => t.creditStatus === 'paid').length,
+        overdue: creditTransactions.filter(t => t.creditStatus === 'overdue').length
       };
+      
+      // Calculate shop breakdown from normalized data
+      const shopBreakdown = {};
+      creditTransactions.forEach(transaction => {
+        const shopName = transaction.shopName || 'Unknown Shop';
+        if (!shopBreakdown[shopName]) {
+          shopBreakdown[shopName] = {
+            totalCredit: 0,
+            outstanding: 0,
+            transactionCount: 0,
+            collectionRate: 0
+          };
+        }
+        shopBreakdown[shopName].totalCredit += transaction.totalAmount || 0;
+        shopBreakdown[shopName].outstanding += transaction.outstandingRevenue || 0;
+        shopBreakdown[shopName].transactionCount += 1;
+        shopBreakdown[shopName].collectionRate = shopBreakdown[shopName].totalCredit > 0 ?
+          ((shopBreakdown[shopName].totalCredit - shopBreakdown[shopName].outstanding) / shopBreakdown[shopName].totalCredit) * 100 : 0;
+      });
+      
+      // Enhanced credit analysis structure with consistent data
+      const enhancedAnalysis = {
+        // Core metrics using normalized data
+        totalCreditSales: parseFloat(totalCreditSales.toFixed(2)),
+        outstandingCredit: parseFloat(outstandingCredit.toFixed(2)),
+        recognizedCreditRevenue: parseFloat(recognizedCreditRevenue.toFixed(2)),
+        
+        // Additional calculated metrics
+        creditSalesCount: Math.max(creditTransactions.length, credits.length),
+        creditCollectionRate: totalCreditSales > 0 ? 
+          parseFloat(((totalCreditSales - outstandingCredit) / totalCreditSales) * 100).toFixed(2) : 0,
+        averageCreditSale: Math.max(creditTransactions.length, credits.length) > 0 ? 
+          parseFloat((totalCreditSales / Math.max(creditTransactions.length, credits.length)).toFixed(2)) : 0,
+        overdueCredit: creditTransactions.filter(t => t.creditStatus === 'overdue')
+          .reduce((sum, t) => sum + (t.outstandingRevenue || 0), 0),
+        creditRiskScore: Math.max(0, 100 - (outstandingCredit / Math.max(totalCreditSales, 1)) * 100),
+        
+        // Data sources for transparency
+        dataSources: {
+          creditTransactions: creditTransactions.length,
+          creditRecords: credits.length,
+          consistency: transactionsData._metadata?.dataConsistency?.consistencyScore || 'UNKNOWN'
+        },
+        
+        // Structured analysis sections
+        summary: {
+          totalCreditSales: parseFloat(totalCreditSales.toFixed(2)),
+          creditSalesCount: Math.max(creditTransactions.length, credits.length),
+          recognizedCreditRevenue: parseFloat(recognizedCreditRevenue.toFixed(2)),
+          creditCollectionRate: totalCreditSales > 0 ? 
+            parseFloat(((totalCreditSales - outstandingCredit) / totalCreditSales) * 100).toFixed(2) : 0,
+          outstandingCredit: parseFloat(outstandingCredit.toFixed(2)),
+          averageCreditSale: Math.max(creditTransactions.length, credits.length) > 0 ? 
+            parseFloat((totalCreditSales / Math.max(creditTransactions.length, credits.length)).toFixed(2)) : 0,
+          overdueAmount: creditTransactions.filter(t => t.creditStatus === 'overdue')
+            .reduce((sum, t) => sum + (t.outstandingRevenue || 0), 0),
+          creditRiskScore: Math.max(0, 100 - (outstandingCredit / Math.max(totalCreditSales, 1)) * 100),
+          statusBreakdown
+        },
+        
+        comprehensive: {
+          summary: {
+            totalCreditSales: parseFloat(totalCreditSales.toFixed(2)),
+            outstandingCredit: parseFloat(outstandingCredit.toFixed(2)),
+            collectionRate: totalCreditSales > 0 ? 
+              parseFloat(((totalCreditSales - outstandingCredit) / totalCreditSales) * 100).toFixed(2) : 0
+          },
+          statusBreakdown,
+          shopBreakdown: Object.entries(shopBreakdown).map(([shopName, data]) => ({
+            shopName,
+            ...data,
+            totalCredit: parseFloat(data.totalCredit.toFixed(2)),
+            outstanding: parseFloat(data.outstanding.toFixed(2)),
+            collectionRate: parseFloat(data.collectionRate.toFixed(2))
+          }))
+        },
+        
+        transactionAnalysis: {
+          transactions: creditTransactions,
+          summary: {
+            totalAmount: parseFloat(totalCreditSales.toFixed(2)),
+            averageAmount: creditTransactions.length > 0 ? 
+              parseFloat((totalCreditSales / creditTransactions.length).toFixed(2)) : 0,
+            collectionRate: totalCreditSales > 0 ? 
+              parseFloat((recognizedCreditRevenue / totalCreditSales) * 100).toFixed(2) : 0
+          }
+        },
+        
+        credits: credits,
+        creditTransactions: creditTransactions
+      };
+      
+      cache.set(cacheKey, enhancedAnalysis);
+      console.log('✅ Combined credit analysis calculated with data consistency');
+      return enhancedAnalysis;
     } catch (error) {
-      console.error('❌ Error exporting report:', error);
+      console.error('❌ Error in credit analysis calculation:', error);
+      
+      const cacheKey = `credit_analysis_${JSON.stringify(params)}`;
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        console.log('🔄 Using stale cached analysis due to error');
+        return cached;
+      }
+      
+      // Return comprehensive fallback data
+      return {
+        totalCreditSales: 0,
+        outstandingCredit: 0,
+        recognizedCreditRevenue: 0,
+        creditSalesCount: 0,
+        creditCollectionRate: 0,
+        averageCreditSale: 0,
+        overdueCredit: 0,
+        creditRiskScore: 100,
+        dataSources: {
+          creditTransactions: 0,
+          creditRecords: 0,
+          consistency: 'ERROR'
+        },
+        summary: {
+          totalCreditSales: 0,
+          creditSalesCount: 0,
+          recognizedCreditRevenue: 0,
+          creditCollectionRate: 0,
+          outstandingCredit: 0,
+          averageCreditSale: 0,
+          overdueAmount: 0,
+          creditRiskScore: 100,
+          statusBreakdown: {
+            pending: 0,
+            partially_paid: 0,
+            paid: 0,
+            overdue: 0
+          }
+        },
+        comprehensive: {
+          summary: {
+            totalCreditSales: 0,
+            outstandingCredit: 0,
+            collectionRate: 0
+          },
+          statusBreakdown: {
+            pending: 0,
+            partially_paid: 0,
+            paid: 0,
+            overdue: 0
+          },
+          shopBreakdown: []
+        },
+        transactionAnalysis: {
+          transactions: [],
+          summary: {
+            totalAmount: 0,
+            averageAmount: 0,
+            collectionRate: 0
+          }
+        },
+        credits: [],
+        creditTransactions: [],
+        error: handleApiError(error)
+      };
+    }
+  }
+};
+
+// ==================== LEGACY API COMPATIBILITY ====================
+
+export const transactionAPI = {
+  // Basic CRUD operations
+  create: async (transactionData) => {
+    try {
+      console.log('💰 Creating transaction:', transactionData);
+      const response = await api.post('/transactions', transactionData);
+      cache.clearAll();
+      console.log('✅ Transaction created successfully');
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error('❌ Error creating transaction:', error);
       throw new Error(handleApiError(error));
     }
   },
-  
-  clearCache: () => {
-    console.log('🧹 Clearing report cache...');
-    cache.clearAll();
-    console.log('✅ Cache cleared');
-    
+
+  getAll: async (params = {}) => {
+    const data = await unifiedAPI.getCombinedTransactions(params);
+    return data.transactions || [];
+  },
+
+  getById: async (id) => {
+    try {
+      // Handle case where id might be an object instead of string
+      const transactionId = typeof id === 'object' ? id._id || id.id || id.transactionId : id;
+      
+      if (!transactionId) {
+        throw new Error('Invalid transaction ID');
+      }
+      
+      const response = await api.get(`/transactions/${transactionId}`);
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error('Error fetching transaction:', error);
+      // Don't throw error for transaction details to prevent breaking the credits list
+      return null;
+    }
+  },
+
+  update: async (id, data) => {
+    try {
+      const response = await api.put(`/transactions/${id}`, data);
+      cache.clearAll();
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error('Error updating transaction:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  delete: async (id) => {
+    try {
+      const response = await api.delete(`/transactions/${id}`);
+      cache.clearAll();
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  // Legacy endpoints routed to unified API
+  getOptimizedReports: async (filters = {}) => {
+    return unifiedAPI.getCombinedTransactions({ ...filters, dataType: 'optimized' });
+  },
+
+  getFinancialAnalysis: async (params = {}) => {
+    const data = await unifiedAPI.getCombinedTransactions(params);
+    const creditAnalysis = await unifiedAPI.getCombinedCreditAnalysis(params);
     return {
-      success: true,
-      timestamp: new Date().toISOString()
+      ...data.summary,
+      creditAnalysis: creditAnalysis.summary || creditAnalysis
+    };
+  },
+
+  getCreditAnalysis: async (params = {}) => {
+    const analysis = await unifiedAPI.getCombinedCreditAnalysis(params);
+    return analysis.summary || analysis;
+  }
+};
+
+export const creditAPI = {
+  // Basic CRUD operations
+  create: async (creditData) => {
+    try {
+      console.log('💳 Creating credit record:', creditData);
+      
+      // Ensure we have the required fields
+      if (!creditData.transactionId) {
+        throw new Error('Transaction ID is required for credit record');
+      }
+      
+      if (!creditData.customerName) {
+        throw new Error('Customer name is required for credit record');
+      }
+      
+      const response = await api.post('/credits', creditData);
+      cache.clearAll();
+      console.log('✅ Credit record created successfully');
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error creating credit record:', error);
+      
+      // Enhanced error handling
+      let errorMessage = handleApiError(error);
+      
+      if (error.message.includes('Transaction ID')) {
+        errorMessage = error.message;
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Credit creation endpoint not found. Please check if the backend server is running.';
+      } else if (error.response?.status === 400) {
+        errorMessage = error.response.data?.message || 'Invalid credit data provided';
+      }
+      
+      throw new Error(errorMessage);
+    }
+  },
+
+  getAll: async (params = {}) => {
+    try {
+      const response = await api.get('/credits', { params });
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error fetching credits:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  getById: async (id) => {
+    try {
+      const response = await api.get(`/credits/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error fetching credit:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  update: async (id, updateData) => {
+    try {
+      const response = await api.put(`/credits/${id}`, updateData);
+      cache.clearAll();
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error updating credit:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  delete: async (id) => {
+    try {
+      const response = await api.delete(`/credits/${id}`);
+      cache.clearAll();
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error deleting credit:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  // Payment operations
+  patchPayment: async (id, paymentData) => {
+    try {
+      const response = await api.patch(`/credits/${id}/payment`, paymentData);
+      cache.clearAll();
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error recording payment:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  getPaymentHistory: async (creditId) => {
+    try {
+      const response = await api.get(`/credits/${creditId}/payment-history`);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error fetching payment history:', error);
+      throw new Error(handleApiError(error));
+    }
+  },
+
+  // Legacy analysis endpoints routed to unified API
+  getAnalysisSummary: async (params = {}) => {
+    const analysis = await unifiedAPI.getCombinedCreditAnalysis(params);
+    return analysis.summary || analysis;
+  },
+
+  getCreditAnalysis: async (params = {}) => {
+    return unifiedAPI.getCombinedCreditAnalysis(params);
+  },
+
+  getComprehensiveAnalysis: async (params = {}) => {
+    const analysis = await unifiedAPI.getCombinedCreditAnalysis(params);
+    return analysis.comprehensive || analysis;
+  }
+};
+
+export const reportAPI = {
+  getDashboardData: async (filters = {}) => {
+    try {
+      console.log('📈 Fetching complete dashboard data...', filters);
+      
+      const [transactionsData, reportsData] = await Promise.all([
+        unifiedAPI.getCombinedTransactions(filters),
+        unifiedAPI.getCombinedReports(filters)
+      ]);
+      
+      const creditAnalysis = await unifiedAPI.getCombinedCreditAnalysis(filters);
+      
+      const dashboardData = {
+        ...transactionsData,
+        ...reportsData,
+        creditAnalysis,
+        creditStats: creditAnalysis.summary,
+        loadedAt: new Date().toISOString(),
+        dataSources: {
+          transactions: transactionsData.transactions?.length || 0,
+          shops: transactionsData.shops?.length || 0,
+          cashiers: transactionsData.cashiers?.length || 0,
+          products: transactionsData.products?.length || 0,
+          credits: creditAnalysis.credits?.length || 0,
+          expenses: transactionsData.expenses?.length || 0
+        }
+      };
+      
+      console.log('✅ Enhanced dashboard data loaded successfully');
+      return dashboardData;
+    } catch (error) {
+      console.error('❌ Error loading enhanced dashboard data:', error);
+      
+      // Try to provide partial data if possible
+      try {
+        const transactionsData = await unifiedAPI.getCombinedTransactions(filters);
+        const creditAnalysis = await unifiedAPI.getCombinedCreditAnalysis(filters);
+        
+        return {
+          ...transactionsData,
+          creditAnalysis,
+          creditStats: creditAnalysis.summary,
+          loadedAt: new Date().toISOString(),
+          dataSources: {
+            transactions: transactionsData.transactions?.length || 0,
+            shops: transactionsData.shops?.length || 0,
+            cashiers: transactionsData.cashiers?.length || 0,
+            products: transactionsData.products?.length || 0,
+            credits: creditAnalysis.credits?.length || 0,
+            expenses: transactionsData.expenses?.length || 0
+          },
+          error: 'Partial data loaded due to server issues'
+        };
+      } catch (fallbackError) {
+        throw new Error(handleApiError(error));
+      }
+    }
+  },
+
+  getCreditAnalysisReport: async (filters = {}) => {
+    const analysis = await unifiedAPI.getCombinedCreditAnalysis(filters);
+    return {
+      ...analysis,
+      reportGenerated: new Date().toISOString(),
+      filters,
+      summary: analysis.summary
     };
   }
 };
 
-// ==================== UTILITY FUNCTIONS ====================
+// ==================== BASIC CRUD APIs ====================
 
-export const storageUtils = {
-  clearUserData: () => {
-    localStorage.removeItem('userData');
-    localStorage.removeItem('adminData');
-    localStorage.removeItem('cashierData');
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('userToken');
+// Basic CRUD APIs (products, shops, cashiers, expenses)
+const createBasicAPI = (endpoint) => ({
+  getAll: async (params = {}) => {
+    try {
+      console.log(`📋 Fetching ${endpoint} with params:`, params);
+      
+      const cacheKey = `${endpoint}_${JSON.stringify(params)}`;
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        console.log(`✅ Using cached ${endpoint}`);
+        return cached;
+      }
+
+      const response = await api.get(`/${endpoint}`, { params });
+      const data = response.data?.data || response.data;
+      const items = Array.isArray(data) ? data : [];
+
+      console.log(`✅ ${endpoint} fetched successfully:`, items.length, 'items');
+      
+      cache.set(cacheKey, items);
+      return items;
+    } catch (error) {
+      console.error(`❌ Error fetching ${endpoint}:`, error);
+      
+      // Enhanced error handling
+      if (error.response?.status === 404) {
+        console.error(`${endpoint} endpoint not found. Please check backend routes.`);
+        return [];
+      }
+      
+      const cacheKey = `${endpoint}_${JSON.stringify(params)}`;
+      const cached = cache.get(cacheKey);
+      return cached || [];
+    }
   },
+
+  getById: async (id) => {
+    try {
+      console.log(`🔍 Fetching ${endpoint} by ID:`, id);
+      const response = await api.get(`/${endpoint}/${id}`);
+      console.log(`✅ ${endpoint} fetched successfully`);
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error(`❌ Error fetching ${endpoint}:`, error);
+      
+      let errorMessage = handleApiError(error);
+      if (error.response?.status === 404) {
+        errorMessage = `${endpoint} not found with ID: ${id}`;
+      }
+      
+      throw new Error(errorMessage);
+    }
+  },
+
+  create: async (data) => {
+    try {
+      console.log(`🆕 Creating ${endpoint}:`, data);
+      const response = await api.post(`/${endpoint}`, data);
+      cache.clearAll();
+      console.log(`✅ ${endpoint} created successfully`);
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error(`❌ Error creating ${endpoint}:`, error);
+      
+      let errorMessage = handleApiError(error);
+      if (error.response?.status === 404) {
+        errorMessage = `${endpoint} creation endpoint not found. Please check backend routes.`;
+      } else if (error.response?.status === 400) {
+        errorMessage = error.response.data?.message || `Invalid ${endpoint} data provided`;
+      } else if (error.response?.status === 500) {
+        errorMessage = `Server error while creating ${endpoint}. Please try again.`;
+      }
+      
+      throw new Error(errorMessage);
+    }
+  },
+
+  update: async (id, data) => {
+    try {
+      console.log(`✏️ Updating ${endpoint} ID:`, id, 'with data:', data);
+      const response = await api.put(`/${endpoint}/${id}`, data);
+      cache.clearAll();
+      console.log(`✅ ${endpoint} updated successfully`);
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error(`❌ Error updating ${endpoint}:`, error);
+      
+      let errorMessage = handleApiError(error);
+      if (error.response?.status === 404) {
+        errorMessage = `${endpoint} not found with ID: ${id}`;
+      }
+      
+      throw new Error(errorMessage);
+    }
+  },
+
+  delete: async (id) => {
+    try {
+      console.log(`🗑️ Deleting ${endpoint} ID:`, id);
+      const response = await api.delete(`/${endpoint}/${id}`);
+      cache.clearAll();
+      console.log(`✅ ${endpoint} deleted successfully`);
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error(`❌ Error deleting ${endpoint}:`, error);
+      
+      let errorMessage = handleApiError(error);
+      if (error.response?.status === 404) {
+        errorMessage = `${endpoint} not found with ID: ${id}`;
+      } else if (error.response?.status === 409) {
+        errorMessage = `Cannot delete ${endpoint} - it may be in use by other records`;
+      }
+      
+      throw new Error(errorMessage);
+    }
+  }
+});
+
+export const productAPI = createBasicAPI('products');
+export const shopAPI = createBasicAPI('shops');
+export const cashierAPI = createBasicAPI('cashiers');
+
+// Enhanced expense API with additional methods
+export const expenseAPI = {
+  ...createBasicAPI('expenses'),
   
-  getUserData: () => {
-    const userData = localStorage.getItem('userData');
-    return userData ? JSON.parse(userData) : null;
-  },
-  
-  getCashierData: () => {
-    const cashierData = localStorage.getItem('cashierData');
-    return cashierData ? JSON.parse(cashierData) : null;
-  },
-  
-  getCurrentUser: () => {
-    return storageUtils.getCashierData() || storageUtils.getUserData();
+  getStats: async (params = {}) => {
+    try {
+      console.log('📊 Fetching expense stats with params:', params);
+      const response = await api.get('/expenses/stats/overview', { params });
+      console.log('✅ Expense stats fetched successfully');
+      return response.data?.data || response.data;
+    } catch (error) {
+      console.error('❌ Error fetching expense stats:', error);
+      
+      // Return comprehensive default stats instead of throwing error
+      return {
+        overview: { 
+          totalExpenses: 0, 
+          totalAmount: 0, 
+          averageExpense: 0, 
+          minExpense: 0, 
+          maxExpense: 0,
+          expensesCount: 0
+        },
+        byCategory: [],
+        byPaymentMethod: [],
+        byShop: [],
+        recentExpenses: [],
+        trends: {
+          daily: [],
+          weekly: [],
+          monthly: []
+        }
+      };
+    }
   },
 
-  isAuthenticated: () => {
-    return !!(storageUtils.getCashierData() || storageUtils.getUserData());
+  getByDateRange: async (startDate, endDate) => {
+    try {
+      console.log('📅 Fetching expenses by date range:', { startDate, endDate });
+      const response = await api.get('/expenses', {
+        params: { startDate, endDate }
+      });
+      const data = response.data?.data || response.data;
+      console.log('✅ Date range expenses fetched successfully:', data?.length || 0, 'items');
+      return data;
+    } catch (error) {
+      console.error('❌ Error fetching expenses by date range:', error);
+      return [];
+    }
   },
 
-  isAdmin: () => {
-    const user = storageUtils.getCurrentUser();
-    return user && user.role === 'admin';
-  },
-
-  getAuthToken: () => {
-    return localStorage.getItem('adminToken') || localStorage.getItem('userToken');
+  getCategories: async () => {
+    try {
+      console.log('📂 Fetching expense categories');
+      const response = await api.get('/expenses/categories');
+      const data = response.data?.data || response.data;
+      console.log('✅ Expense categories fetched successfully:', data?.length || 0, 'categories');
+      return data;
+    } catch (error) {
+      console.error('❌ Error fetching expense categories:', error);
+      return [];
+    }
   }
 };
 
 // ==================== MAIN API SERVICE ====================
 
 const apiService = {
+  // Unified endpoints (recommended)
+  unified: unifiedAPI,
+  
+  // Legacy endpoints (for backward compatibility)
   auth: authAPI,
   transactions: transactionAPI,
   products: productAPI,
@@ -1728,9 +1409,9 @@ const apiService = {
   expenses: expenseAPI,
   credits: creditAPI,
   reports: reportAPI,
-  system: systemAPI,
-  setup: setupAPI,
-  utils: storageUtils,
+  
+  // Utility functions
+  handleApiError,
   cache
 };
 

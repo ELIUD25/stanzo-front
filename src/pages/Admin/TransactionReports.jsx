@@ -25,41 +25,26 @@ import {
   Avatar,
   Progress,
   Badge,
-  Popconfirm,
-  Descriptions,
-  Collapse,
-  Switch,
-  Form,
-  InputNumber
+  Descriptions
 } from 'antd';
 import {
-  HistoryOutlined,
   SearchOutlined,
-  ReloadOutlined,
   EyeOutlined,
-  FilterOutlined,
-  DownloadOutlined,
-  BarChartOutlined,
   DollarOutlined,
-  RiseOutlined,
-  FallOutlined,
-  ShoppingCartOutlined,
-  CalculatorOutlined,
-  MoneyCollectOutlined,
-  LineChartOutlined,
+  UserOutlined,
+  ShopOutlined,
+  AppstoreOutlined,
+  FileTextOutlined,
+  CreditCardOutlined,
   PieChartOutlined,
   TableOutlined,
-  InfoCircleOutlined,
-  SettingOutlined,
-  ExportOutlined,
-  AppstoreOutlined,
-  TeamOutlined,
-  DeleteOutlined,
-  ShopOutlined,
-  CalendarOutlined,
-  CreditCardOutlined
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  ExclamationCircleOutlined,
+  ExportOutlined
 } from '@ant-design/icons';
-import { transactionAPI, shopAPI, productAPI, cashierAPI, expenseAPI, creditAPI } from '../../services/api';
+import { unifiedAPI, shopAPI } from '../../services/api';
+import { CalculationUtils } from '../../utils/calculationUtils';
 import dayjs from 'dayjs';
 import advancedFormat from 'dayjs/plugin/advancedFormat';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
@@ -74,1688 +59,110 @@ const { RangePicker } = DatePicker;
 const { Option } = Select;
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
-const { Panel } = Collapse;
 
 // =============================================
-// UPDATED CALCULATION UTILITIES (ALIGNED WITH IMAGE EXAMPLES)
+// CONSTANTS AND CONFIGURATION
 // =============================================
 
-const CalculationUtils = {
-  safeNumber: (value, fallback = 0) => {
-    if (value === null || value === undefined || value === '') return fallback;
-    const num = Number(value);
-    return isNaN(num) ? fallback : num;
-  },
+const TIME_RANGE_OPTIONS = [
+  { label: 'Today', value: 'daily' },
+  { label: 'Last 7 Days', value: '7d' },
+  { label: 'Last 30 Days', value: '30d' },
+  { label: 'This Year', value: 'yearly' },
+  { label: 'All Time', value: 'all' },
+  { label: 'Custom Range', value: 'custom' }
+];
 
-  formatCurrency: (amount) => {
-    const value = CalculationUtils.safeNumber(amount);
-    return `KES ${value.toLocaleString('en-KE', { 
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2 
-    })}`;
-  },
+const PAYMENT_METHOD_OPTIONS = [
+  { label: 'All Payments', value: '' },
+  { label: 'CASH', value: 'cash' },
+  { label: 'MPESA/BANK', value: 'mpesa' },
+  { label: 'CREDIT', value: 'credit' }
+];
 
-  getProfitColor: (profit) => {
-    const value = CalculationUtils.safeNumber(profit);
-    if (value > 0) return '#3f8600';
-    if (value < 0) return '#cf1322';
-    return '#d9d9d9';
-  },
+const TRANSACTION_TYPE_OPTIONS = [
+  { label: 'All Transactions', value: '' },
+  { label: 'Complete Transactions', value: 'complete' },
+  { label: 'Credit Transactions', value: 'credit' }
+];
 
-  getProfitIcon: (profit) => {
-    const value = CalculationUtils.safeNumber(profit);
-    return value >= 0 ? <RiseOutlined /> : <FallOutlined />;
-  },
+const STATUS_CONFIG = {
+  completed: { color: 'green', text: 'COMPLETED' },
+  pending: { color: 'orange', text: 'PENDING' },
+  refunded: { color: 'blue', text: 'REFUNDED' },
+  cancelled: { color: 'red', text: 'CANCELLED' },
+  credit: { color: 'red', text: 'CREDIT' }
+};
 
-  // UPDATED: Simplified profit calculation as shown in images
-  calculateProfit: (revenue, cost) => {
-    const revenueNum = CalculationUtils.safeNumber(revenue);
-    const costNum = CalculationUtils.safeNumber(cost);
-    return revenueNum - costNum;
-  },
+const PAYMENT_METHOD_CONFIG = {
+  cash: { color: 'orange', text: 'CASH' },
+  mpesa: { color: 'green', text: 'MPESA' },
+  bank: { color: 'blue', text: 'BANK' },
+  credit: { color: 'red', text: 'CREDIT' },
+  card: { color: 'purple', text: 'CARD' }
+};
 
-  // UPDATED: Calculate profit margin as shown in images
-  calculateProfitMargin: (revenue, profit) => {
-    const revenueNum = CalculationUtils.safeNumber(revenue);
-    const profitNum = CalculationUtils.safeNumber(profit);
-    if (revenueNum <= 0) return 100.0; // Default to 100% as shown in images
-    return (profitNum / revenueNum) * 100;
-  },
-
-  validateTransactionData: (transaction) => {
-    if (!transaction || typeof transaction !== 'object') {
-      return CalculationUtils.createFallbackTransaction();
-    }
-    
-    try {
-      const items = transaction.items || [];
-      const totalAmount = CalculationUtils.safeNumber(
-        transaction.totalAmount || 
-        transaction.amount || 
-        items.reduce((sum, item) => sum + CalculationUtils.safeNumber(item.totalPrice || item.price), 0)
-      );
-
-      const cost = CalculationUtils.safeNumber(
-        transaction.cost || 
-        items.reduce((sum, item) => sum + (CalculationUtils.safeNumber(item.buyingPrice || item.costPrice) * CalculationUtils.safeNumber(item.quantity)), 0)
-      );
-
-      // UPDATED: Use simplified profit calculation
-      const profit = CalculationUtils.calculateProfit(totalAmount, cost);
-      const profitMargin = CalculationUtils.calculateProfitMargin(totalAmount, profit);
-
-      const validated = {
-        _id: transaction._id?.toString() || `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        transactionNumber: transaction.transactionNumber || 
-                          transaction.receiptNumber || 
-                          transaction._id?.toString()?.substring(0, 8) || 
-                          `TXN-${Date.now().toString().slice(-6)}`,
-        totalAmount,
-        cost,
-        profit,
-        profitMargin,
-        paymentMethod: ['cash', 'mpesa', 'bank', 'credit', 'card'].includes(transaction.paymentMethod?.toLowerCase()) 
-          ? transaction.paymentMethod.toLowerCase() 
-          : 'cash',
-        status: ['completed', 'pending', 'cancelled', 'refunded'].includes(transaction.status?.toLowerCase())
-          ? transaction.status.toLowerCase()
-          : 'completed',
-        customerName: String(transaction.customerName || transaction.customer || 'Walk-in Customer').trim(),
-        cashierName: String(transaction.cashierName || transaction.cashier || 'Unknown Cashier').trim(),
-        shop: String(transaction.shop || transaction.shopName || transaction.shopId?.name || 'Unknown Shop').trim(),
-        shopId: transaction.shopId || transaction.shop,
-        saleDate: transaction.saleDate || transaction.createdAt || transaction.date || new Date(),
-        items: Array.isArray(items) ? items : [],
-        itemsCount: CalculationUtils.safeNumber(transaction.itemsCount || items.reduce((sum, item) => sum + CalculationUtils.safeNumber(item.quantity), 0)),
-        createdAt: transaction.createdAt,
-        updatedAt: transaction.updatedAt,
-        // Credit specific fields
-        isCredit: transaction.paymentMethod === 'credit',
-        creditStatus: transaction.creditStatus || 'pending',
-        creditAmount: CalculationUtils.safeNumber(transaction.creditAmount),
-        creditBalance: CalculationUtils.safeNumber(transaction.creditBalance)
-      };
-      
-      return validated;
-    } catch (error) {
-      console.error('❌ Error validating transaction:', error);
-      return CalculationUtils.createFallbackTransaction();
-    }
-  },
-
-  createFallbackTransaction: () => ({
-    _id: `fallback_${Date.now()}`,
-    transactionNumber: `FALLBACK-${Date.now()}`,
-    totalAmount: 0,
-    cost: 0,
-    profit: 0,
-    profitMargin: 100.0, // UPDATED: Default to 100% as shown in images
-    paymentMethod: 'cash',
-    status: 'completed',
-    customerName: 'Walk-in Customer',
-    cashierName: 'Unknown Cashier',
-    shop: 'Unknown Shop',
-    saleDate: new Date(),
-    items: [],
-    itemsCount: 0,
-    createdAt: new Date(),
-    updatedAt: new Date()
-  }),
-
-  processSalesData: (salesData, productsData = [], expensesData = [], selectedShopId = null, creditsData = []) => {
-    console.log('🔧 Processing sales data with credit support:', {
-      salesCount: salesData?.length || 0,
-      productsCount: productsData?.length || 0,
-      expensesCount: expensesData?.length || 0,
-      creditsCount: creditsData?.length || 0,
-      selectedShopId
-    });
-
-    if (!salesData || !Array.isArray(salesData) || salesData.length === 0) {
-      console.warn('⚠️ No sales data provided or empty array');
-      return { 
-        salesWithProfit: [], 
-        financialStats: CalculationUtils.getDefaultStats() 
-      };
-    }
-
-    // Filter by shop if specified
-    let filteredSales = salesData;
-    if (selectedShopId && selectedShopId !== 'all') {
-      filteredSales = salesData.filter(sale => {
-        const saleShopId = sale.shopId || sale.shop;
-        return saleShopId === selectedShopId;
-      });
-      console.log(`🏪 Filtered to ${filteredSales.length} transactions for shop: ${selectedShopId}`);
-    }
-
-    // Process credit transactions
-    const processCreditTransactions = (sales) => {
-      return sales.map(sale => {
-        if (sale.paymentMethod === 'credit') {
-          const creditRecord = creditsData.find(credit => 
-            credit.transactionId?._id === sale._id || 
-            credit.transactionId === sale._id
-          );
-          
-          if (creditRecord) {
-            return {
-              ...sale,
-              isCredit: true,
-              creditStatus: creditRecord.status,
-              creditAmount: creditRecord.totalAmount,
-              creditBalance: creditRecord.balanceDue,
-              revenueRecognized: sale.totalAmount
-            };
-          }
-        }
-        return sale;
-      });
-    };
-
-    const salesWithCreditProcessing = processCreditTransactions(filteredSales);
-
-    // Process each sale with enhanced cost calculations
-    const salesWithProfit = salesWithCreditProcessing.map(sale => {
-      try {
-        const validatedSale = CalculationUtils.validateTransactionData(sale);
-        const items = validatedSale.items || [];
-        
-        const itemsWithProfit = items.map(item => {
-          const product = CalculationUtils.findProduct(productsData, item);
-          const buyingPrice = product?.buyingPrice || item.buyingPrice || item.costPrice || 0;
-          const quantity = Math.max(1, CalculationUtils.safeNumber(item.quantity, 1));
-          const unitPrice = CalculationUtils.safeNumber(item.unitPrice || item.price);
-          const totalPrice = CalculationUtils.safeNumber(item.totalPrice) || (unitPrice * quantity);
-          const cost = buyingPrice * quantity;
-          // UPDATED: Use simplified profit calculation
-          const profit = CalculationUtils.calculateProfit(totalPrice, cost);
-          const profitMargin = CalculationUtils.calculateProfitMargin(totalPrice, profit);
-
-          return {
-            ...item,
-            productName: item.productName || product?.name || 'Unknown Product',
-            buyingPrice: CalculationUtils.safeNumber(buyingPrice),
-            cost: parseFloat(cost.toFixed(2)),
-            profit: parseFloat(profit.toFixed(2)),
-            profitMargin: parseFloat(profitMargin.toFixed(2)),
-            quantity,
-            unitPrice,
-            totalPrice,
-            category: item.category || product?.category || '',
-            barcode: item.barcode || product?.barcode || ''
-          };
-        });
-
-        const totalAmount = CalculationUtils.safeNumber(validatedSale.totalAmount) || itemsWithProfit.reduce((sum, item) => sum + item.totalPrice, 0);
-        const totalCost = itemsWithProfit.reduce((sum, item) => sum + item.cost, 0);
-        // UPDATED: Use simplified profit calculation
-        const totalProfit = CalculationUtils.calculateProfit(totalAmount, totalCost);
-        const profitMargin = CalculationUtils.calculateProfitMargin(totalAmount, totalProfit);
-        const itemsCount = itemsWithProfit.reduce((sum, item) => sum + item.quantity, 0);
-
-        return {
-          ...validatedSale,
-          items: itemsWithProfit,
-          totalAmount: parseFloat(totalAmount.toFixed(2)),
-          totalCost: parseFloat(totalCost.toFixed(2)),
-          totalProfit: parseFloat(totalProfit.toFixed(2)),
-          profitMargin: parseFloat(profitMargin.toFixed(2)),
-          itemsCount,
-          displayDate: dayjs(validatedSale.saleDate).format('DD/MM/YYYY HH:mm'),
-          displayAmount: CalculationUtils.formatCurrency(totalAmount),
-          displayProfit: CalculationUtils.formatCurrency(totalProfit),
-          displayMargin: `${profitMargin.toFixed(1)}%`,
-          isCreditTransaction: validatedSale.paymentMethod === 'credit',
-          creditDisplay: validatedSale.paymentMethod === 'credit' ? 
-            `Credit: ${CalculationUtils.formatCurrency(validatedSale.creditBalance || totalAmount)}` : 'Paid'
-        };
-      } catch (error) {
-        console.error('❌ Error processing sale:', error, sale);
-        return CalculationUtils.createFallbackSale(sale);
-      }
-    });
-
-    const validSales = salesWithProfit.filter(sale => sale && sale.totalAmount > 0);
-    
-    // Calculate financial statistics INCLUDING credit sales
-    const totalRevenue = validSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-    const totalCost = validSales.reduce((sum, sale) => sum + sale.totalCost, 0);
-    // UPDATED: Use simplified profit calculation
-    const totalProfit = CalculationUtils.calculateProfit(totalRevenue, totalCost);
-    
-    // Calculate credit-specific metrics
-    const creditSales = validSales.filter(sale => sale.paymentMethod === 'credit');
-    const totalCreditAmount = creditSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-    const outstandingCredit = creditsData
-      .filter(credit => credit.status !== 'paid')
-      .reduce((sum, credit) => sum + CalculationUtils.safeNumber(credit.balanceDue), 0);
-    
-    // Process expenses safely with shop filtering
-    const safeExpenses = Array.isArray(expensesData) ? expensesData : [];
-    let filteredExpenses = safeExpenses;
-    if (selectedShopId && selectedShopId !== 'all') {
-      filteredExpenses = safeExpenses.filter(expense => expense.shop === selectedShopId);
-    }
-    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + CalculationUtils.safeNumber(expense.amount), 0);
-    
-    // UPDATED: Use simplified profit calculation
-    const netProfit = CalculationUtils.calculateProfit(totalProfit, totalExpenses);
-    const profitMargin = CalculationUtils.calculateProfitMargin(totalRevenue, netProfit);
-    const averageTransactionValue = validSales.length > 0 ? totalRevenue / validSales.length : 0;
-    const totalItemsSold = validSales.reduce((sum, sale) => sum + sale.itemsCount, 0);
-
-    const financialStats = {
-      totalSales: validSales.length,
-      totalRevenue: parseFloat(totalRevenue.toFixed(2)),
-      totalCost: parseFloat(totalCost.toFixed(2)),
-      totalProfit: parseFloat(totalProfit.toFixed(2)),
-      totalExpenses: parseFloat(totalExpenses.toFixed(2)),
-      netProfit: parseFloat(netProfit.toFixed(2)),
-      profitMargin: parseFloat(profitMargin.toFixed(2)),
-      totalItemsSold,
-      averageTransactionValue: parseFloat(averageTransactionValue.toFixed(2)),
-      totalTransactions: validSales.length,
-      validSalesCount: validSales.length,
-      invalidSalesCount: filteredSales.length - validSales.length,
-      selectedShop: selectedShopId || 'all',
-      
-      // Credit metrics
-      creditSalesCount: creditSales.length,
-      totalCreditAmount: parseFloat(totalCreditAmount.toFixed(2)),
-      outstandingCredit: parseFloat(outstandingCredit.toFixed(2)),
-      
-      timestamp: new Date().toISOString()
-    };
-
-    console.log('📈 Final financial stats with credit:', financialStats);
-    
-    return {
-      salesWithProfit: validSales,
-      financialStats
-    };
-  },
-
-  findProduct: (productsData, item) => {
-    if (!productsData || !Array.isArray(productsData)) return null;
-    
-    const productId = item.productId || item.product;
-    const productName = item.productName || item.name;
-    
-    return productsData.find(p => {
-      if (!p) return false;
-      
-      if (productId && p._id && p._id.toString() === productId.toString()) {
-        return true;
-      }
-      
-      if (productName && p.name && p.name.toLowerCase() === productName.toLowerCase()) {
-        return true;
-      }
-      
-      if (productId && p._id && p._id._id && p._id._id.toString() === productId.toString()) {
-        return true;
-      }
-      
-      if (item.barcode && p.barcode && p.barcode === item.barcode) {
-        return true;
-      }
-      
-      return false;
-    });
-  },
-
-  createFallbackSale: (originalSale) => ({
-    ...CalculationUtils.createFallbackTransaction(),
-    ...(originalSale || {}),
-    items: [],
-    cost: 0,
-    profit: 0,
-    profitMargin: 100.0, // UPDATED: Default to 100% as shown in images
-    itemsCount: 0,
-    totalAmount: 0,
-    status: 'completed'
-  }),
-
-  getDefaultStats: () => ({
-    totalSales: 0,
-    totalRevenue: 0,
-    totalCost: 0,
-    totalProfit: 0,
-    totalExpenses: 0,
-    netProfit: 0,
-    profitMargin: 100.0, // UPDATED: Default to 100% as shown in images
-    totalProducts: 0,
-    totalShops: 0,
-    totalCashiers: 0,
-    lowStockCount: 0,
-    dailyRevenue: 0,
-    dailyProfit: 0,
-    totalItemsSold: 0,
-    averageTransactionValue: 0,
-    totalTransactions: 0,
-    creditSalesCount: 0,
-    totalCreditAmount: 0,
-    outstandingCredit: 0,
-    timestamp: new Date().toISOString(),
-    dataQuality: 'no_data'
-  }),
-
-  calculateTopProducts: (transactionsData, limit = 10, selectedShopId = null) => {
-    if (!transactionsData || !Array.isArray(transactionsData)) {
-      return [];
-    }
-
-    let filteredTransactions = transactionsData;
-    if (selectedShopId && selectedShopId !== 'all') {
-      filteredTransactions = transactionsData.filter(transaction => {
-        const transactionShopId = transaction.shopId || transaction.shop;
-        return transactionShopId === selectedShopId;
-      });
-    }
-
-    const productSales = {};
-    const validTransactions = filteredTransactions.filter(t => t && Array.isArray(t.items));
-    
-    validTransactions.forEach(transaction => {
-      transaction.items?.forEach(item => {
-        if (!item) return;
-        
-        const productName = item.productName || 'Unknown Product';
-        const productId = item.productId || productName;
-        const key = `${productId}-${productName}`;
-        
-        if (!productSales[key]) {
-          productSales[key] = {
-            id: productId,
-            name: productName,
-            totalSold: 0,
-            totalRevenue: 0,
-            totalProfit: 0,
-            totalCost: 0,
-            transactions: 0,
-            averageQuantity: 0
-          };
-        }
-        
-        productSales[key].totalSold += CalculationUtils.safeNumber(item.quantity, 1);
-        productSales[key].totalRevenue += CalculationUtils.safeNumber(item.totalPrice);
-        productSales[key].totalProfit += CalculationUtils.safeNumber(item.profit);
-        productSales[key].totalCost += CalculationUtils.safeNumber(item.cost) * CalculationUtils.safeNumber(item.quantity, 1);
-        productSales[key].transactions += 1;
-      });
-    });
-    
-    const result = Object.values(productSales)
-      .map(product => {
-        // UPDATED: Use simplified profit calculation
-        const profitMargin = CalculationUtils.calculateProfitMargin(product.totalRevenue, product.totalProfit);
-        const averageQuantity = product.transactions > 0 ? product.totalSold / product.transactions : 0;
-        const revenuePerUnit = product.totalSold > 0 ? product.totalRevenue / product.totalSold : 0;
-        
-        return {
-          ...product,
-          profitMargin: parseFloat(profitMargin.toFixed(2)),
-          averageQuantity: parseFloat(averageQuantity.toFixed(2)),
-          revenuePerUnit: parseFloat(revenuePerUnit.toFixed(2)),
-          performanceScore: CalculationUtils.calculateProductPerformanceScore(product)
-        };
-      })
-      .sort((a, b) => b.totalRevenue - a.totalRevenue)
-      .slice(0, limit);
-
-    return result;
-  },
-
-  calculateProductPerformanceScore: (product) => {
-    const revenueScore = Math.min(100, (product.totalRevenue / 10000) * 100);
-    const profitScore = Math.min(100, (product.totalProfit / 5000) * 100);
-    const volumeScore = Math.min(100, (product.totalSold / 500) * 100);
-    const marginScore = Math.min(100, product.profitMargin * 2);
-    
-    return parseFloat(((revenueScore * 0.3) + (profitScore * 0.3) + (volumeScore * 0.2) + (marginScore * 0.2)).toFixed(1));
-  },
-
-  calculateShopPerformance: (transactions, shops = []) => {
-    if (!transactions || !Array.isArray(transactions)) {
-      return [];
-    }
-
-    const shopSales = {};
-    const validTransactions = transactions.filter(t => t && t.shop);
-    
-    validTransactions.forEach(sale => {
-      const shop = sale.shop;
-      const shopId = sale.shopId || shop;
-      
-      if (!shopSales[shopId]) {
-        const shopInfo = shops.find(s => s._id === shopId || s.name === shop);
-        const shopName = shopInfo?.name || shop;
-        
-        shopSales[shopId] = { 
-          id: shopId,
-          name: shopName,
-          revenue: 0, 
-          transactions: 0, 
-          profit: 0,
-          cost: 0,
-          itemsSold: 0,
-          averageTransaction: 0,
-          profitMargin: 100.0 // UPDATED: Default to 100% as shown in images
-        };
-      }
-      shopSales[shopId].revenue += CalculationUtils.safeNumber(sale.totalAmount);
-      shopSales[shopId].transactions += 1;
-      shopSales[shopId].profit += CalculationUtils.safeNumber(sale.profit);
-      shopSales[shopId].cost += CalculationUtils.safeNumber(sale.cost);
-      shopSales[shopId].itemsSold += CalculationUtils.safeNumber(sale.itemsCount);
-    });
-    
-    const result = Object.values(shopSales)
-      .map((data) => {
-        const averageTransaction = data.transactions > 0 ? data.revenue / data.transactions : 0;
-        // UPDATED: Use simplified profit calculation
-        const profitMargin = CalculationUtils.calculateProfitMargin(data.revenue, data.profit);
-        const efficiency = data.transactions > 0 ? data.itemsSold / data.transactions : 0;
-        
-        return { 
-          ...data,
-          revenue: parseFloat(data.revenue.toFixed(2)),
-          profit: parseFloat(data.profit.toFixed(2)),
-          cost: parseFloat(data.cost.toFixed(2)),
-          averageTransaction: parseFloat(averageTransaction.toFixed(2)),
-          profitMargin: parseFloat(profitMargin.toFixed(2)),
-          efficiency: parseFloat(efficiency.toFixed(2)),
-          performanceScore: CalculationUtils.calculateShopPerformanceScore(data)
-        };
-      })
-      .sort((a, b) => b.revenue - a.revenue)
-      .map((shop, index) => ({
-        ...shop,
-        rank: index + 1,
-        performance: CalculationUtils.getPerformanceTier(shop.performanceScore)
-      }));
-
-    return result;
-  },
-
-  calculateShopPerformanceScore: (data) => {
-    const revenueScore = Math.min(100, (data.revenue / 100000) * 100);
-    const transactionScore = Math.min(100, (data.transactions / 200) * 100);
-    const marginScore = Math.min(100, data.profitMargin * 2);
-    const efficiencyScore = Math.min(100, data.efficiency * 20);
-    
-    return parseFloat(((revenueScore * 0.4) + (transactionScore * 0.2) + (marginScore * 0.2) + (efficiencyScore * 0.2)).toFixed(1));
-  },
-
-  // UPDATED: Remove 'poor' reference from performance tiers
-  getPerformanceTier: (score) => {
-    if (score >= 90) return { tier: 'excellent', color: '#52c41a', label: 'Excellent' };
-    if (score >= 75) return { tier: 'good', color: '#1890ff', label: 'Good' };
-    if (score >= 60) return { tier: 'average', color: '#faad14', label: 'Average' };
-    if (score >= 40) return { tier: 'needs_improvement', color: '#fa8c16', label: 'Needs Improvement' };
-    return { tier: 'underperforming', color: '#cf1322', label: 'Underperforming' };
-  },
-
-  calculateRevenueTrends: (transactionsData, period = 'day', days = 7, selectedShopId = null) => {
-    if (!transactionsData || !Array.isArray(transactionsData)) {
-      return [];
-    }
-
-    let filteredTransactions = transactionsData;
-    if (selectedShopId && selectedShopId !== 'all') {
-      filteredTransactions = transactionsData.filter(transaction => {
-        const transactionShopId = transaction.shopId || transaction.shop;
-        return transactionShopId === selectedShopId;
-      });
-    }
-
-    const validTransactions = filteredTransactions.filter(t => t && t.saleDate);
-    const dailyData = {};
-    
-    validTransactions.forEach(transaction => {
-      const date = dayjs(transaction.saleDate);
-      let periodKey;
-      
-      switch (period) {
-        case 'month':
-          periodKey = date.format('YYYY-MM');
-          break;
-        case 'week':
-          periodKey = date.format('YYYY-[W]WW');
-          break;
-        case 'hour':
-          periodKey = date.format('YYYY-MM-DD HH:00');
-          break;
-        default: // day
-          periodKey = date.format('YYYY-MM-DD');
-      }
-      
-      if (!dailyData[periodKey]) {
-        dailyData[periodKey] = { 
-          revenue: 0, 
-          transactions: 0, 
-          profit: 0,
-          cost: 0,
-          itemsSold: 0,
-          date: periodKey,
-          displayDate: CalculationUtils.getDisplayDate(periodKey, period)
-        };
-      }
-      
-      dailyData[periodKey].revenue += CalculationUtils.safeNumber(transaction.totalAmount);
-      dailyData[periodKey].transactions += 1;
-      dailyData[periodKey].profit += CalculationUtils.safeNumber(transaction.profit);
-      dailyData[periodKey].cost += CalculationUtils.safeNumber(transaction.cost);
-      dailyData[periodKey].itemsSold += CalculationUtils.safeNumber(transaction.itemsCount);
-    });
-    
-    const result = Object.values(dailyData)
-      .map(periodData => ({
-        ...periodData,
-        revenue: parseFloat(periodData.revenue.toFixed(2)),
-        profit: parseFloat(periodData.profit.toFixed(2)),
-        cost: parseFloat(periodData.cost.toFixed(2)),
-        averageTransaction: periodData.transactions > 0 ? periodData.revenue / periodData.transactions : 0,
-        // UPDATED: Use simplified profit calculation
-        profitMargin: CalculationUtils.calculateProfitMargin(periodData.revenue, periodData.profit)
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-days);
-
-    return result;
-  },
-
-  getDisplayDate: (dateString, period) => {
-    switch (period) {
-      case 'month':
-        return dayjs(dateString).format('MMM YYYY');
-      case 'week':
-        return `Week ${dateString.split('-W')[1]}, ${dateString.split('-')[0]}`;
-      case 'hour':
-        return dayjs(dateString).format('DD/MM HH:00');
-      default: // day
-        return dayjs(dateString).format('DD/MM/YYYY');
-    }
-  }
+const CREDIT_STATUS_CONFIG = {
+  pending: { color: 'orange', icon: <ClockCircleOutlined />, text: 'PENDING' },
+  partially_paid: { color: 'blue', icon: <DollarOutlined />, text: 'PARTIALLY PAID' },
+  paid: { color: 'green', icon: <CheckCircleOutlined />, text: 'PAID' },
+  overdue: { color: 'red', icon: <ExclamationCircleOutlined />, text: 'OVERDUE' }
 };
 
 // =============================================
-// UPDATED COMPONENTS (REARRANGED ORDER AS SPECIFIED)
-// =============================================
-
-// Shop Filter Component
-const ShopFilter = ({ shops, value, onChange, loading }) => (
-  <div>
-    <div style={{ marginBottom: 8 }}>
-      <Text strong>Select Shop:</Text>
-    </div>
-    <Select
-      value={value}
-      onChange={onChange}
-      style={{ width: '100%' }}
-      placeholder="Filter by shop"
-      allowClear
-      loading={loading}
-    >
-      <Option value="all">All Shops</Option>
-      {shops.map(shop => (
-        <Option key={shop._id} value={shop._id}>
-          {shop.name}
-        </Option>
-      ))}
-    </Select>
-  </div>
-);
-
-// Enhanced Financial Overview Component
-const FinancialOverview = ({ stats, loading, selectedShop, shops }) => {
-  const financialMetrics = [
-    {
-      title: 'Total Revenue',
-      value: stats.totalRevenue || 0,
-      prefix: 'KES',
-      color: '#1890ff',
-      icon: <MoneyCollectOutlined />,
-      description: 'Total sales revenue (including credit)'
-    },
-    {
-      title: 'Total Cost',
-      value: stats.totalCost || 0,
-      prefix: 'KES',
-      color: '#faad14',
-      icon: <CalculatorOutlined />,
-      description: 'Total cost of goods sold'
-    },
-    {
-      title: 'Gross Profit',
-      value: stats.totalProfit || 0,
-      prefix: 'KES',
-      color: CalculationUtils.getProfitColor(stats.totalProfit),
-      icon: CalculationUtils.getProfitIcon(stats.totalProfit),
-      description: 'Revenue minus cost'
-    },
-    {
-      title: 'Total Expenses',
-      value: stats.totalExpenses || 0,
-      prefix: 'KES',
-      color: '#cf1322',
-      icon: <DollarOutlined />,
-      description: 'Total operating expenses'
-    },
-    {
-      title: 'Net Profit',
-      value: stats.netProfit || 0,
-      prefix: 'KES',
-      color: CalculationUtils.getProfitColor(stats.netProfit),
-      icon: CalculationUtils.getProfitIcon(stats.netProfit),
-      description: 'Profit after expenses'
-    },
-    {
-      title: 'Profit Margin',
-      value: stats.profitMargin || 0,
-      suffix: '%',
-      color: stats.profitMargin >= 0 ? '#3f8600' : '#cf1322',
-      description: 'Net profit percentage'
-    },
-    {
-      title: 'Total Sales',
-      value: stats.totalSales || 0,
-      color: '#722ed1',
-      description: 'Number of transactions'
-    },
-    {
-      title: 'Items Sold',
-      value: stats.totalItemsSold || 0,
-      color: '#52c41a',
-      description: 'Total quantity sold'
-    }
-  ];
-
-  return (
-    <div>
-      <div style={{ marginBottom: 16, padding: '12px', backgroundColor: '#f0f8ff', borderRadius: 6 }}>
-        <Text strong>Shop: </Text>
-        <Tag color="blue">
-          {selectedShop === 'all' ? 'All Shops' : 
-           shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Tag>
-        <Text style={{ marginLeft: 16 }} type="secondary">
-          Showing {stats.totalTransactions || 0} transactions
-          {stats.creditSalesCount > 0 && (
-            <Text style={{ marginLeft: 8 }} type="secondary">
-              ({stats.creditSalesCount} credit sales)
-            </Text>
-          )}
-        </Text>
-      </div>
-
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        {financialMetrics.map((metric, index) => (
-          <Col xs={24} sm={12} md={8} lg={6} key={index}>
-            <Card 
-              loading={loading}
-              hoverable
-              style={{ transition: 'all 0.3s ease' }}
-            >
-              <Statistic
-                title={
-                  <Space>
-                    <Tooltip title={metric.description}>
-                      <span style={{ cursor: 'help' }}>{metric.title}</span>
-                    </Tooltip>
-                  </Space>
-                }
-                value={metric.value}
-                prefix={metric.prefix}
-                suffix={metric.suffix}
-                precision={2}
-                valueStyle={{ color: metric.color }}
-                formatter={value => (
-                  <span style={{ color: metric.color }}>
-                    {typeof value === 'number' ? value.toLocaleString('en-KE', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    }) : value}
-                  </span>
-                )}
-              />
-              <div style={{ marginTop: 8, fontSize: '12px', color: '#999' }}>
-                {metric.description}
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-    </div>
-  );
-};
-
-// Credit Analysis Component (Now at the top)
-const CreditAnalysis = ({ credits, stats, loading, selectedShop, shops }) => {
-  const creditMetrics = [
-    {
-      title: 'Total Credit Sales',
-      value: stats.totalCreditAmount || 0,
-      prefix: 'KES',
-      color: '#faad14',
-      icon: <CreditCardOutlined />,
-      description: 'Total sales on credit'
-    },
-    {
-      title: 'Outstanding Credit',
-      value: stats.outstandingCredit || 0,
-      prefix: 'KES',
-      color: '#cf1322',
-      icon: <DollarOutlined />,
-      description: 'Unpaid credit balance'
-    },
-    {
-      title: 'Credit Sales Count',
-      value: stats.creditSalesCount || 0,
-      color: '#722ed1',
-      icon: <ShoppingCartOutlined />,
-      description: 'Number of credit transactions'
-    },
-    {
-      title: 'Credit Ratio',
-      value: stats.totalRevenue > 0 ? ((stats.totalCreditAmount || 0) / stats.totalRevenue * 100) : 0,
-      suffix: '%',
-      color: '#1890ff',
-      description: 'Credit sales vs total revenue'
-    }
-  ];
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <CreditCardOutlined />
-          Credit Analysis
-          <Badge count={stats.creditSalesCount || 0} showZero color="orange" />
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">
-          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Text>
-      </div>
-
-      <Row gutter={[16, 16]}>
-        {creditMetrics.map((metric, index) => (
-          <Col xs={24} sm={12} md={8} lg={6} key={index}>
-            <Card 
-              loading={loading}
-              hoverable
-              style={{ transition: 'all 0.3s ease' }}
-            >
-              <Statistic
-                title={
-                  <Space>
-                    <Tooltip title={metric.description}>
-                      <span style={{ cursor: 'help' }}>{metric.title}</span>
-                    </Tooltip>
-                  </Space>
-                }
-                value={metric.value}
-                prefix={metric.prefix}
-                suffix={metric.suffix}
-                precision={2}
-                valueStyle={{ color: metric.color }}
-                formatter={value => (
-                  <span style={{ color: metric.color }}>
-                    {typeof value === 'number' ? value.toLocaleString('en-KE', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    }) : value}
-                  </span>
-                )}
-              />
-              <div style={{ marginTop: 8, fontSize: '12px', color: '#999' }}>
-                {metric.description}
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      {credits && credits.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <Text strong>Recent Credit Transactions:</Text>
-          <List
-            size="small"
-            dataSource={credits.slice(0, 5)}
-            renderItem={credit => (
-              <List.Item>
-                <List.Item.Meta
-                  avatar={<Avatar icon={<CreditCardOutlined />} />}
-                  title={credit.customerName || 'Unknown Customer'}
-                  description={
-                    <Space>
-                      <Text>Amount: {CalculationUtils.formatCurrency(credit.totalAmount)}</Text>
-                      <Text>Balance: {CalculationUtils.formatCurrency(credit.balanceDue)}</Text>
-                      <Tag color={credit.status === 'paid' ? 'green' : 'orange'}>
-                        {credit.status?.toUpperCase()}
-                      </Tag>
-                    </Space>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        </div>
-      )}
-    </Card>
-  );
-};
-
-// UPDATED: Shop Performance Component (Now shows second as specified)
-const ShopPerformance = ({ transactions, shops, loading, selectedShop }) => {
-  const shopPerformance = useMemo(() => {
-    return CalculationUtils.calculateShopPerformance(transactions, shops);
-  }, [transactions, shops]);
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <ShopOutlined />
-          Shop Performance Comparison
-          <Badge count={shopPerformance.length} showZero color="#1890ff" />
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">
-          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Text>
-      </div>
-      
-      {shopPerformance.length > 0 ? (
-        <List
-          dataSource={shopPerformance}
-          renderItem={(shop, index) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
-                    <Avatar 
-                      style={{ 
-                        backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
-                        color: index < 3 ? '#fff' : '#000'
-                      }}
-                    >
-                      {shop.name?.charAt(0)?.toUpperCase() || 'S'}
-                    </Avatar>
-                  </Badge>
-                }
-                title={
-                  <Space>
-                    <Text strong>{shop.name}</Text>
-                    {index < 3 && <Tag color="gold">Top Performer</Tag>}
-                    <Tag color={shop.performance.color}>{shop.performance.label}</Tag>
-                  </Space>
-                }
-                description={
-                  <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
-                        <Text strong style={{ color: '#1890ff' }}>
-                          {CalculationUtils.formatCurrency(shop.revenue)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Transactions</Text>
-                        <Text strong>{shop.transactions}</Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Avg. Transaction</Text>
-                        <Text strong>
-                          {CalculationUtils.formatCurrency(shop.averageTransaction)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
-                        <Text strong style={{ color: '#3f8600' }}>
-                          {shop.profitMargin.toFixed(1)}%
-                        </Text>
-                      </Space>
-                    </Col>
-                  </Row>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No shop performance data available" />
-      )}
-    </Card>
-  );
-};
-
-// UPDATED: Cashier Performance Component (Now shows third as specified)
-const CashierPerformance = ({ transactions, cashiers, loading, selectedShop, shops }) => {
-  const cashierPerformance = useMemo(() => {
-    let filteredTransactions = transactions;
-    if (selectedShop && selectedShop !== 'all') {
-      filteredTransactions = transactions.filter(transaction => {
-        const transactionShopId = transaction.shopId || transaction.shop;
-        return transactionShopId === selectedShop;
-      });
-    }
-
-    const performance = {};
-    
-    filteredTransactions.forEach(transaction => {
-      const cashierName = transaction.cashierName || 'Unknown Cashier';
-      if (!performance[cashierName]) {
-        performance[cashierName] = {
-          name: cashierName,
-          revenue: 0,
-          transactions: 0,
-          profit: 0,
-          itemsSold: 0,
-          creditSales: 0,
-          creditAmount: 0
-        };
-      }
-      performance[cashierName].revenue += transaction.totalAmount || 0;
-      performance[cashierName].profit += transaction.profit || 0;
-      performance[cashierName].transactions += 1;
-      performance[cashierName].itemsSold += transaction.itemsCount || 0;
-      
-      if (transaction.paymentMethod === 'credit') {
-        performance[cashierName].creditSales += 1;
-        performance[cashierName].creditAmount += transaction.totalAmount || 0;
-      }
-    });
-    
-    return Object.values(performance)
-      .map(cashier => ({
-        ...cashier,
-        averageTransaction: cashier.transactions > 0 ? cashier.revenue / cashier.transactions : 0,
-        // UPDATED: Use simplified profit calculation
-        profitMargin: CalculationUtils.calculateProfitMargin(cashier.revenue, cashier.profit),
-        creditRatio: cashier.revenue > 0 ? (cashier.creditAmount / cashier.revenue) * 100 : 0
-      }))
-      .sort((a, b) => b.revenue - a.revenue);
-  }, [transactions, selectedShop]);
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <TeamOutlined />
-          Cashier Performance
-          <Badge count={cashierPerformance.length} showZero color="#1890ff" />
-        </Space>
-      } 
-      style={{ marginBottom: 24 }}
-      loading={loading}
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">
-          Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-        </Text>
-      </div>
-      
-      {cashierPerformance.length > 0 ? (
-        <List
-          dataSource={cashierPerformance}
-          renderItem={(cashier, index) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#52c41a' : '#d9d9d9'}>
-                    <Avatar 
-                      style={{ 
-                        backgroundColor: index < 3 ? '#52c41a' : '#d9d9d9',
-                        color: index < 3 ? '#fff' : '#000'
-                      }}
-                    >
-                      {cashier.name?.charAt(0)?.toUpperCase() || 'C'}
-                    </Avatar>
-                  </Badge>
-                }
-                title={
-                  <Space>
-                    <Text strong>{cashier.name}</Text>
-                    {index < 3 && <Tag color="green">Top Performer</Tag>}
-                    {cashier.creditSales > 0 && (
-                      <Tag color="orange">{cashier.creditSales} credit sales</Tag>
-                    )}
-                  </Space>
-                }
-                description={
-                  <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
-                        <Text strong style={{ color: '#1890ff' }}>
-                          {CalculationUtils.formatCurrency(cashier.revenue)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Transactions</Text>
-                        <Text strong>{cashier.transactions}</Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Avg. Transaction</Text>
-                        <Text strong>
-                          {CalculationUtils.formatCurrency(cashier.averageTransaction)}
-                        </Text>
-                      </Space>
-                    </Col>
-                    <Col xs={24} sm={6}>
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
-                        <Text strong style={{ color: '#3f8600' }}>
-                          {cashier.profitMargin.toFixed(1)}%
-                        </Text>
-                      </Space>
-                    </Col>
-                  </Row>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No cashier performance data available" />
-      )}
-    </Card>
-  );
-};
-
-// UPDATED: Product Performance Component (Now shows at the bottom as specified)
-const ProductPerformance = ({ topProducts, loading, selectedShop, shops }) => (
-  <Card 
-    title={
-      <Space>
-        <AppstoreOutlined />
-        Product Performance Analysis
-        <Badge count={topProducts.length} showZero color="#1890ff" />
-      </Space>
-    } 
-    style={{ marginBottom: 24 }}
-    loading={loading}
-  >
-    <div style={{ marginBottom: 16 }}>
-      <Text type="secondary">
-        Shop: {selectedShop === 'all' ? 'All Shops' : shops?.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
-      </Text>
-    </div>
-    
-    {topProducts.length > 0 ? (
-      <List
-        dataSource={topProducts}
-        renderItem={(product, index) => (
-          <List.Item
-            actions={[
-              <Tooltip key="view" title="View product details">
-                <Button type="link" icon={<EyeOutlined />} size="small" />
-              </Tooltip>
-            ]}
-          >
-            <List.Item.Meta
-              avatar={
-                <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
-                  <Avatar 
-                    style={{ 
-                      backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
-                      color: index < 3 ? '#fff' : '#000'
-                    }}
-                  >
-                    {product.name?.charAt(0)?.toUpperCase() || 'P'}
-                  </Avatar>
-                </Badge>
-              }
-              title={
-                <Space>
-                  <Text strong style={{ maxWidth: 200 }} ellipsis={{ tooltip: product.name }}>
-                    {product.name}
-                  </Text>
-                  <Tag color="blue">{product.totalSold} units</Tag>
-                  {index < 3 && <Tag color="gold">Top Seller</Tag>}
-                </Space>
-              }
-              description={
-                <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
-                  <Col xs={24} sm={6}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Revenue</Text>
-                      <Text strong style={{ color: '#1890ff' }}>
-                        {CalculationUtils.formatCurrency(product.totalRevenue)}
-                      </Text>
-                    </Space>
-                  </Col>
-                  <Col xs={24} sm={6}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Profit</Text>
-                      <Text strong style={{ color: CalculationUtils.getProfitColor(product.totalProfit) }}>
-                        {CalculationUtils.formatCurrency(product.totalProfit)}
-                      </Text>
-                    </Space>
-                  </Col>
-                  <Col xs={24} sm={6}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Avg. Price</Text>
-                      <Text strong>
-                        {CalculationUtils.formatCurrency(product.revenuePerUnit)}
-                      </Text>
-                    </Space>
-                  </Col>
-                  <Col xs={24} sm={6}>
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>Profit Margin</Text>
-                      <Text strong style={{ color: '#3f8600' }}>
-                        {product.profitMargin.toFixed(1)}%
-                      </Text>
-                    </Space>
-                  </Col>
-                </Row>
-              }
-            />
-          </List.Item>
-        )}
-      />
-    ) : (
-      <Empty description="No product sales data available" />
-    )}
-  </Card>
-);
-
-// ... (Rest of the components remain the same: ExportReportModal, TransactionDetailsModal, ReportSettings, SearchHelp, TimeRangeFilter, PaymentModeFilter)
-
-// Export Report Modal
-const ExportReportModal = ({ visible, onCancel, data, filters, loading, selectedShop, shops }) => {
-  const [exporting, setExporting] = useState(false);
-  const [exportFormat, setExportFormat] = useState('csv');
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      if (exportFormat === 'csv') {
-        const headers = ['Transaction ID', 'Date', 'Customer', 'Cashier', 'Shop', 'Total Amount', 'Cost', 'Profit', 'Margin', 'Payment Method', 'Status', 'Items Count', 'Credit Status'];
-        const csvContent = [
-          headers.join(','),
-          ...data.transactions.map(transaction => [
-            transaction.transactionNumber || transaction.receiptNumber || transaction._id,
-            dayjs(transaction.createdAt || transaction.saleDate).format('YYYY-MM-DD HH:mm'),
-            transaction.customerName || 'Walk-in',
-            transaction.cashierName,
-            transaction.shop,
-            transaction.totalAmount,
-            transaction.cost,
-            transaction.profit,
-            transaction.profitMargin?.toFixed(2) + '%',
-            transaction.paymentMethod,
-            transaction.status,
-            transaction.itemsCount,
-            transaction.paymentMethod === 'credit' ? (transaction.creditStatus || 'pending') : 'N/A'
-          ].join(','))
-        ].join('\n');
-
-        const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `transactions-report-${dayjs().format('YYYY-MM-DD')}.csv`;
-        link.click();
-        window.URL.revokeObjectURL(url);
-      } else if (exportFormat === 'json') {
-        const shopName = selectedShop === 'all' ? 'All Shops' : shops.find(s => s._id === selectedShop)?.name || 'Selected Shop';
-        
-        const exportData = {
-          metadata: {
-            exportedAt: new Date().toISOString(),
-            totalTransactions: data.transactions.length,
-            filters: {
-              ...filters,
-              shop: shopName
-            },
-            summary: data.stats
-          },
-          transactions: data.transactions
-        };
-        
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `transactions-report-${dayjs().format('YYYY-MM-DD')}.json`;
-        link.click();
-        window.URL.revokeObjectURL(url);
-      }
-
-      message.success(`Exported ${data.transactions.length} transactions in ${exportFormat.toUpperCase()} format!`);
-      onCancel();
-    } catch (error) {
-      console.error('Export failed:', error);
-      message.error('Export failed. Please try again.');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const shopName = selectedShop === 'all' ? 'All Shops' : shops.find(s => s._id === selectedShop)?.name || 'Selected Shop';
-
-  return (
-    <Modal
-      title={
-        <Space>
-          <ExportOutlined />
-          Export Report
-        </Space>
-      }
-      open={visible}
-      onCancel={onCancel}
-      footer={[
-        <Button key="cancel" onClick={onCancel} disabled={exporting}>
-          Cancel
-        </Button>,
-        <Button 
-          key="export" 
-          type="primary" 
-          onClick={handleExport} 
-          loading={exporting}
-          icon={<DownloadOutlined />}
-        >
-          Export ({exportFormat.toUpperCase()})
-        </Button>
-      ]}
-      width={500}
-    >
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Text strong>Export Options</Text>
-        
-        <Form layout="vertical">
-          <Form.Item label="Export Format">
-            <Select value={exportFormat} onChange={setExportFormat}>
-              <Option value="csv">CSV (Excel Compatible)</Option>
-              <Option value="json">JSON (Structured Data)</Option>
-            </Select>
-          </Form.Item>
-        </Form>
-        
-        <Divider />
-        
-        <Text type="secondary">
-          This will export <Text strong>{data.transactions.length}</Text> transactions to {exportFormat.toUpperCase()} format.
-          <div style={{ marginTop: 8 }}>
-            <Text strong>Shop: </Text>
-            <Tag color="blue">{shopName}</Tag>
-          </div>
-          {filters.dateRange && (
-            <div>
-              Date Range: {dayjs(filters.dateRange[0]).format('DD/MM/YYYY')} - {dayjs(filters.dateRange[1]).format('DD/MM/YYYY')}
-            </div>
-          )}
-        </Text>
-      </Space>
-    </Modal>
-  );
-};
-
-// Transaction Details Modal
-const TransactionDetailsModal = ({ transaction, visible, onCancel, shops }) => {
-  if (!transaction) return null;
-
-  const shopName = transaction.shop || shops.find(s => s._id === transaction.shopId)?.name || 'Unknown Shop';
-
-  return (
-    <Modal
-      title={
-        <Space>
-          <EyeOutlined />
-          Transaction Details
-          <Tag color={transaction.status === 'completed' ? 'green' : 'orange'}>
-            {transaction.status?.toUpperCase()}
-          </Tag>
-          {transaction.paymentMethod === 'credit' && (
-            <Tag color="orange">
-              CREDIT - {transaction.creditStatus?.toUpperCase() || 'PENDING'}
-            </Tag>
-          )}
-        </Space>
-      }
-      open={visible}
-      onCancel={onCancel}
-      footer={[
-        <Button key="close" onClick={onCancel}>
-          Close
-        </Button>
-      ]}
-      width={700}
-    >
-      <Descriptions bordered column={2} size="small">
-        <Descriptions.Item label="Transaction ID" span={2}>
-          <Text code>{transaction.transactionNumber || transaction._id}</Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Date & Time">
-          {dayjs(transaction.saleDate).format('DD/MM/YYYY HH:mm')}
-        </Descriptions.Item>
-        <Descriptions.Item label="Customer">
-          {transaction.customerName || 'Walk-in Customer'}
-        </Descriptions.Item>
-        <Descriptions.Item label="Shop">
-          {shopName}
-        </Descriptions.Item>
-        <Descriptions.Item label="Cashier">
-          {transaction.cashierName}
-        </Descriptions.Item>
-        <Descriptions.Item label="Payment Method">
-          <Tag color={transaction.paymentMethod === 'cash' ? 'orange' : transaction.paymentMethod === 'credit' ? 'red' : 'green'}>
-            {transaction.paymentMethod?.toUpperCase()}
-          </Tag>
-        </Descriptions.Item>
-        {transaction.paymentMethod === 'credit' && (
-          <>
-            <Descriptions.Item label="Credit Status">
-              <Tag color={transaction.creditStatus === 'paid' ? 'green' : 'orange'}>
-                {transaction.creditStatus?.toUpperCase() || 'PENDING'}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Credit Balance">
-              <Text strong type="danger">
-                {CalculationUtils.formatCurrency(transaction.creditBalance || transaction.totalAmount)}
-              </Text>
-            </Descriptions.Item>
-          </>
-        )}
-        <Descriptions.Item label="Total Amount">
-          <Text strong style={{ color: '#1890ff' }}>
-            {CalculationUtils.formatCurrency(transaction.totalAmount)}
-          </Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Total Cost">
-          <Text style={{ color: '#faad14' }}>
-            {CalculationUtils.formatCurrency(transaction.cost)}
-          </Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Profit">
-          <Text strong style={{ color: CalculationUtils.getProfitColor(transaction.profit) }}>
-            {CalculationUtils.formatCurrency(transaction.profit)}
-          </Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Profit Margin">
-          <Text strong style={{ color: '#3f8600' }}>
-            {transaction.profitMargin?.toFixed(1)}%
-          </Text>
-        </Descriptions.Item>
-      </Descriptions>
-
-      <Divider>Items ({transaction.items?.length || 0})</Divider>
-      
-      {transaction.items?.length > 0 ? (
-        <List
-          size="small"
-          dataSource={transaction.items}
-          renderItem={(item, index) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={<Avatar size="small">{index + 1}</Avatar>}
-                title={
-                  <Space>
-                    <Text strong>{item.productName}</Text>
-                    <Tag color="blue">Qty: {item.quantity}</Tag>
-                  </Space>
-                }
-                description={
-                  <Row gutter={16} style={{ width: '100%' }}>
-                    <Col span={6}>
-                      <Text type="secondary">Price: </Text>
-                      <Text>{CalculationUtils.formatCurrency(item.price)}</Text>
-                    </Col>
-                    <Col span={6}>
-                      <Text type="secondary">Total: </Text>
-                      <Text strong>{CalculationUtils.formatCurrency(item.totalPrice)}</Text>
-                    </Col>
-                    <Col span={6}>
-                      <Text type="secondary">Profit: </Text>
-                      <Text style={{ color: CalculationUtils.getProfitColor(item.profit) }}>
-                        {CalculationUtils.formatCurrency(item.profit)}
-                      </Text>
-                    </Col>
-                    <Col span={6}>
-                      <Text type="secondary">Margin: </Text>
-                      <Text style={{ color: '#3f8600' }}>{item.profitMargin?.toFixed(1)}%</Text>
-                    </Col>
-                  </Row>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      ) : (
-        <Empty description="No items found" />
-      )}
-    </Modal>
-  );
-};
-
-// Report Settings Component
-const ReportSettings = ({ settings, onSettingsChange }) => {
-  const [visible, setVisible] = useState(false);
-
-  const handleSettingChange = (key, value) => {
-    onSettingsChange({
-      ...settings,
-      [key]: value
-    });
-  };
-
-  return (
-    <>
-      <Button 
-        icon={<SettingOutlined />} 
-        onClick={() => setVisible(true)}
-        type="text"
-      >
-        Settings
-      </Button>
-      
-      <Modal
-        title="Report Settings"
-        open={visible}
-        onCancel={() => setVisible(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setVisible(false)}>
-            Cancel
-          </Button>,
-          <Button key="save" type="primary" onClick={() => setVisible(false)}>
-            Save Settings
-          </Button>
-        ]}
-        width={500}
-      >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Text strong>Display Settings</Text>
-          
-          <Form layout="vertical">
-            <Form.Item label="Auto-refresh Interval (minutes)">
-              <InputNumber
-                min={1}
-                max={60}
-                value={settings.autoRefreshInterval}
-                onChange={(value) => handleSettingChange('autoRefreshInterval', value)}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-            
-            <Form.Item label="Default Date Range">
-              <Select
-                value={settings.defaultDateRange}
-                onChange={(value) => handleSettingChange('defaultDateRange', value)}
-                style={{ width: '100%' }}
-              >
-                <Option value="7d">Last 7 Days</Option>
-                <Option value="30d">Last 30 Days</Option>
-                <Option value="90d">Last 90 Days</Option>
-                <Option value="custom">Custom Range</Option>
-              </Select>
-            </Form.Item>
-            
-            <Form.Item>
-              <Space>
-                <Switch 
-                  checked={settings.showProfitMargins} 
-                  onChange={(checked) => handleSettingChange('showProfitMargins', checked)}
-                />
-                <Text>Show Profit Margins</Text>
-              </Space>
-            </Form.Item>
-            
-            <Form.Item>
-              <Space>
-                <Switch 
-                  checked={settings.includeExpenses} 
-                  onChange={(checked) => handleSettingChange('includeExpenses', checked)}
-                />
-                <Text>Include Expenses in Calculations</Text>
-              </Space>
-            </Form.Item>
-
-            <Form.Item>
-              <Space>
-                <Switch 
-                  checked={settings.includeCreditInRevenue} 
-                  onChange={(checked) => handleSettingChange('includeCreditInRevenue', checked)}
-                />
-                <Text>Include Credit Sales in Revenue</Text>
-              </Space>
-            </Form.Item>
-          </Form>
-        </Space>
-      </Modal>
-    </>
-  );
-};
-
-// Search Help Component
-const SearchHelp = () => (
-  <div style={{ marginBottom: 8 }}>
-    <Text type="secondary" style={{ fontSize: '12px' }}>
-      💡 Search tips: You can search by product name, customer name, cashier name, shop name, transaction ID, or payment method
-    </Text>
-  </div>
-);
-
-// Time Range Filter Component
-const TimeRangeFilter = ({ value, onChange }) => {
-  const options = [
-    { label: 'Last 7 Days', value: '7d' },
-    { label: 'Last 30 Days', value: '30d' },
-    { label: 'Last 90 Days', value: '90d' },
-    { label: 'This Year', value: 'yearly' },
-    { label: 'All Time', value: 'all' },
-    { label: 'Custom Range', value: 'custom' }
-  ];
-
-  return (
-    <div>
-      <div style={{ marginBottom: 8 }}>
-        <Text strong>Select Time Range:</Text>
-      </div>
-      <Select
-        value={value}
-        onChange={onChange}
-        style={{ width: '100%' }}
-        placeholder="Choose time range"
-      >
-        {options.map(option => (
-          <Option key={option.value} value={option.value}>
-            {option.label}
-          </Option>
-        ))}
-      </Select>
-    </div>
-  );
-};
-
-// Payment Mode Filter Component
-const PaymentModeFilter = ({ value, onChange }) => {
-  const options = [
-    { label: 'CASH', value: 'cash' },
-    { label: 'MPESA/BANK', value: 'mpesa' },
-    { label: 'CREDIT', value: 'credit' }
-  ];
-
-  return (
-    <div>
-      <div style={{ marginBottom: 8 }}>
-        <Text strong>Payment Mode:</Text>
-      </div>
-      <Select
-        value={value}
-        onChange={onChange}
-        style={{ width: '100%' }}
-        placeholder="Filter by payment mode"
-        allowClear
-      >
-        {options.map(option => (
-          <Option key={option.value} value={option.value}>
-            {option.label}
-          </Option>
-        ))}
-      </Select>
-    </div>
-  );
-};
-
-// =============================================
-// UPDATED MAIN TRANSACTIONS REPORT COMPONENT
+// MAIN COMPONENT - UPDATED VERSION
 // =============================================
 
 const TransactionsReport = ({ currentUser }) => {
-  // State management
-  const [transactions, setTransactions] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [credits, setCredits] = useState([]);
+  // State management - simplified
+  const [comprehensiveData, setComprehensiveData] = useState({
+    financialStats: CalculationUtils.getDefaultStatsWithCreditManagement(),
+    businessStats: {
+      totalProducts: 0,
+      totalShops: 0,
+      totalCashiers: 0,
+      lowStockCount: 0,
+      activeCredits: 0
+    },
+    recentTransactions: [],
+    lowStockProducts: [],
+    topProducts: [],
+    shopPerformance: [],
+    creditAlerts: [],
+    cashierPerformance: []
+  });
+  
   const [loading, setLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchText, setSearchText] = useState('');
-  const [dateRange, setDateRange] = useState(null);
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
-  const [timeRangeFilter, setTimeRangeFilter] = useState('yearly');
-  const [selectedShop, setSelectedShop] = useState('all');
+  
+  // Filters - always visible, auto-refresh enabled by default
+  const [filters, setFilters] = useState({
+    dateRange: null,
+    shop: 'all',
+    paymentMethod: '',
+    transactionType: '',
+    timeRange: '30d' // Default to last 30 days for better data visibility
+  });
+  
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [viewModalVisible, setViewModalVisible] = useState(false);
-  const [exportModalVisible, setExportModalVisible] = useState(false);
   const [shops, setShops] = useState([]);
-  const [cashiers, setCashiers] = useState([]);
-  const [products, setProducts] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
-  const [settings, setSettings] = useState({
-    autoRefreshInterval: 5,
-    defaultDateRange: 'yearly',
-    showProfitMargins: true,
-    includeExpenses: true,
-    includeCreditInRevenue: true
-  });
+  const [dataTimestamp, setDataTimestamp] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
-  // Stats state - aligned with Admin Dashboard structure
-  const [stats, setStats] = useState(CalculationUtils.getDefaultStats());
+  // Auto-refresh effect - PERMANENT (every 30 seconds)
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      console.log('🔄 Auto-refreshing transaction report...');
+      fetchAllData();
+    }, 30000); // Refresh every 30 seconds
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, []);
 
   // Calculate date range based on timeRangeFilter
   const calculateDateRange = useCallback((rangeType) => {
@@ -1763,14 +170,14 @@ const TransactionsReport = ({ currentUser }) => {
     let startDate;
 
     switch (rangeType) {
+      case 'daily':
+        startDate = now.startOf('day');
+        break;
       case '7d':
         startDate = now.subtract(7, 'days');
         break;
       case '30d':
         startDate = now.subtract(30, 'days');
-        break;
-      case '90d':
-        startDate = now.subtract(90, 'days');
         break;
       case 'yearly':
         startDate = now.startOf('year');
@@ -1778,166 +185,286 @@ const TransactionsReport = ({ currentUser }) => {
       case 'all':
         return null;
       case 'custom':
-        return dateRange;
+        return filters.dateRange;
       default:
-        startDate = now.startOf('year');
+        startDate = now.subtract(30, 'days'); // Default to 30 days
     }
 
     return [startDate, now];
-  }, [dateRange]);
+  }, [filters.dateRange]);
 
-  // Update date range when timeRangeFilter changes
+  // Update date range when timeRange changes
   useEffect(() => {
-    const newDateRange = calculateDateRange(timeRangeFilter);
-    setDateRange(newDateRange);
-  }, [timeRangeFilter, calculateDateRange]);
+    const newDateRange = calculateDateRange(filters.timeRange);
+    setFilters(prev => ({ ...prev, dateRange: newDateRange }));
+  }, [filters.timeRange, calculateDateRange]);
 
-  // Auto-fetch data when filters change
-  useEffect(() => {
-    fetchAllData();
-  }, [selectedShop, timeRangeFilter, paymentMethodFilter]);
+  // Data fetching
+  const fetchAllData = useCallback(async (customFilters = null) => {
+    if (loading) return;
 
-  const fetchAllData = useCallback(async () => {
-    if (loading) {
-      console.log('⏳ Skipping fetch - already loading');
-      return;
-    }
-  
-    console.log('🚀 START: Enhanced fetchAllData for Transaction Reports');
+    const activeFilters = customFilters || filters;
     
     setLoading(true);
     setError(null);
     
     try {
+      console.log('🚀 Fetching transaction report data with unified API...', activeFilters);
+      
+      // Fetch shops first for filtering
+      const shopsData = await shopAPI.getAll();
+      setShops(shopsData);
+
+      // Build params
       const params = {};
       
-      // Apply date range filter if set
-      if (dateRange && dateRange.length === 2) {
-        params.startDate = dayjs(dateRange[0]).format('YYYY-MM-DD');
-        params.endDate = dayjs(dateRange[1]).format('YYYY-MM-DD');
-      } else if (timeRangeFilter !== 'all') {
-        const calculatedRange = calculateDateRange(timeRangeFilter);
-        if (calculatedRange && calculatedRange.length === 2) {
-          params.startDate = dayjs(calculatedRange[0]).format('YYYY-MM-DD');
-          params.endDate = dayjs(calculatedRange[1]).format('YYYY-MM-DD');
-        }
+      // Apply date range filter
+      if (activeFilters.dateRange && activeFilters.dateRange[0] && activeFilters.dateRange[1]) {
+        params.startDate = dayjs(activeFilters.dateRange[0]).format('YYYY-MM-DD');
+        params.endDate = dayjs(activeFilters.dateRange[1]).format('YYYY-MM-DD');
       }
       
-      if (paymentMethodFilter) {
-        params.paymentMethod = paymentMethodFilter;
+      // Apply shop filter
+      if (activeFilters.shop && activeFilters.shop !== 'all') {
+        params.shopId = activeFilters.shop;
       }
-  
-      if (selectedShop && selectedShop !== 'all') {
-        params.shopId = selectedShop;
-      }
-  
-      console.log('📋 Fetch parameters:', params);
-  
-      // Use the comprehensive data endpoint
-      let comprehensiveData;
-      try {
-        console.log('🔄 Fetching comprehensive transaction data...');
-        comprehensiveData = await transactionAPI.getComprehensiveData(params);
-        console.log('✅ Comprehensive data received:', {
-          transactions: comprehensiveData?.transactions?.length || 0,
-          expenses: comprehensiveData?.expenses?.length || 0,
-          products: comprehensiveData?.products?.length || 0
-        });
-      } catch (error) {
-        console.error('❌ Comprehensive data error:', error);
-        // Fallback to individual API calls
-        const [transactionsData, expensesData, productsData] = await Promise.all([
-          safeApiCall(() => transactionAPI.getAll(params), []),
-          safeApiCall(() => expenseAPI.getAll(params), []),
-          safeApiCall(() => productAPI.getAll(), [])
-        ]);
-        
-        comprehensiveData = {
-          transactions: transactionsData,
-          expenses: expensesData,
-          products: productsData
-        };
-      }
-  
-      // Get additional data in parallel
-      const [shopsData, cashiersData, creditsData] = await Promise.all([
-        safeApiCall(() => shopAPI.getAll(), []),
-        safeApiCall(() => cashierAPI.getAll(), []),
-        safeApiCall(() => creditAPI.getAll(params), [])
-      ]);
-  
-      console.log('📊 All data loaded:', {
-        transactions: comprehensiveData?.transactions?.length || 0,
-        expenses: comprehensiveData?.expenses?.length || 0,
-        products: comprehensiveData?.products?.length || 0,
-        shops: shopsData.length,
-        cashiers: cashiersData.length,
-        credits: creditsData.length
+
+      // Use unified API endpoint
+      const comprehensiveData = await unifiedAPI.getCombinedTransactions(params);
+      
+      console.log('📊 Unified API response for Transaction Report:', {
+        transactions: comprehensiveData.salesWithProfit?.length,
+        financialStats: comprehensiveData.financialStats,
+        hasEnhancedStats: !!comprehensiveData.enhancedStats
       });
-  
-      // Process the data
-      const { salesWithProfit, financialStats } = CalculationUtils.processSalesData(
-        comprehensiveData?.transactions || [],
-        comprehensiveData?.products || [],
-        comprehensiveData?.expenses || [],
-        selectedShop,
-        creditsData
-      );
-  
-      setTransactions(salesWithProfit);
-      setShops(shopsData);
-      setCashiers(cashiersData);
-      setCredits(creditsData);
-  
-      // Calculate additional stats
-      const topProducts = CalculationUtils.calculateTopProducts(salesWithProfit, 10, selectedShop);
-      const shopPerformance = CalculationUtils.calculateShopPerformance(salesWithProfit, shopsData);
-  
-      // Update stats
-      const enhancedStats = {
-        ...financialStats,
-        totalProducts: comprehensiveData?.products?.length || 0,
-        totalShops: shopsData.length,
-        totalCashiers: cashiersData.length,
-        topProducts,
-        shopPerformance,
-        credits: creditsData,
-        timestamp: new Date().toISOString()
-      };
-  
-      setStats(enhancedStats);
-  
-      // Show success message
-      if (salesWithProfit.length > 0) {
-        const shopName = selectedShop === 'all' ? 'All Shops' : shopsData.find(s => s._id === selectedShop)?.name || 'Selected Shop';
-        message.success(`Loaded ${salesWithProfit.length} transactions for ${shopName}`);
+
+      // Process data
+      const processedData = processTransactionReportData(comprehensiveData, shopsData, activeFilters);
+      setComprehensiveData(processedData);
+      setDataTimestamp(new Date().toISOString());
+
+      const transactionCount = processedData.recentTransactions.length;
+      if (transactionCount > 0) {
+        let shopName = 'All Shops';
+        if (activeFilters.shop !== 'all') {
+          const foundShop = shopsData.find(s => s._id === activeFilters.shop);
+          shopName = foundShop?.name || 'Selected Shop';
+        }
+        
+        const creditTransactionCount = processedData.financialStats.creditSalesCount || 0;
+        const creditInfo = creditTransactionCount > 0 ? 
+          ` (${creditTransactionCount} credit transactions)` : '';
+        
+        message.success(`Loaded ${transactionCount} transactions${creditInfo} for ${shopName}`);
       } else {
-        message.info('No transactions found for the selected filters');
+        message.info('No transaction data found for the selected filters');
       }
-  
+
     } catch (error) {
-      console.error('❌ Main error fetching data:', error);
       const errorMessage = error.response?.data?.message || 
                         error.response?.data?.error || 
                         error.message || 
                         'Failed to load transaction data. Please try again.';
       setError(errorMessage);
       message.error(errorMessage);
+      
+      // Set fallback data structure
+      setComprehensiveData({
+        financialStats: CalculationUtils.getDefaultStatsWithCreditManagement(),
+        businessStats: {
+          totalProducts: 0,
+          totalShops: 0,
+          totalCashiers: 0,
+          lowStockCount: 0,
+          activeCredits: 0
+        },
+        recentTransactions: [],
+        lowStockProducts: [],
+        topProducts: [],
+        shopPerformance: [],
+        creditAlerts: [],
+        cashierPerformance: []
+      });
     } finally {
       setLoading(false);
-      console.log('🏁 END: fetchAllData completed');
     }
-  }, [dateRange, paymentMethodFilter, selectedShop, timeRangeFilter, calculateDateRange, loading]);
-  
-  // Helper function for safe API calls
-  const safeApiCall = async (apiCall, fallback = []) => {
-    try {
-      const response = await apiCall();
-      return Array.isArray(response) ? response : (response?.data || fallback);
-    } catch (error) {
-      console.error('API call failed:', error);
-      return fallback;
+  }, [filters, loading]);
+
+  // Data processing function
+  const processTransactionReportData = (comprehensiveData, shops, activeFilters) => {
+    console.log('🔄 Processing transaction report data...');
+    
+    // Process data
+    const processedData = CalculationUtils.processComprehensiveData(
+      comprehensiveData, 
+      activeFilters.shop === 'all' ? null : activeFilters.shop,
+      { 
+        includePerformance: true,
+        includeProducts: true 
+      }
+    );
+
+    // Extract data from processed structure
+    const transactions = processedData.salesWithProfit || [];
+    const financialStats = processedData.financialStats || CalculationUtils.getDefaultStatsWithCreditManagement();
+    const products = processedData.products || [];
+    const expenses = processedData.expenses || [];
+    const credits = processedData.credits || [];
+    const cashiers = processedData.cashiers || [];
+
+    console.log('📈 Processed data extracted:', {
+      transactions: transactions.length,
+      products: products.length,
+      expenses: expenses.length,
+      credits: credits.length,
+      cashiers: cashiers.length
+    });
+
+    // Apply additional filters for transaction report
+    let filteredTransactions = transactions;
+    
+    // Apply payment method filter
+    if (activeFilters.paymentMethod) {
+      filteredTransactions = filteredTransactions.filter(t => 
+        t.paymentMethod === activeFilters.paymentMethod
+      );
     }
+    
+    // Apply transaction type filter
+    if (activeFilters.transactionType === 'credit') {
+      filteredTransactions = filteredTransactions.filter(t => t.isCreditTransaction);
+    } else if (activeFilters.transactionType === 'complete') {
+      filteredTransactions = filteredTransactions.filter(t => !t.isCreditTransaction);
+    }
+
+    // Apply date range filter to transactions if needed
+    if (activeFilters.dateRange && activeFilters.dateRange[0] && activeFilters.dateRange[1]) {
+      filteredTransactions = CalculationUtils.filterDataByDateRange(
+        filteredTransactions,
+        activeFilters.dateRange[0],
+        activeFilters.dateRange[1],
+        'saleDate'
+      );
+    }
+
+    // Recent transactions (all filtered transactions for report)
+    const recentTransactions = filteredTransactions
+      .sort((a, b) => new Date(b.saleDate || b.createdAt) - new Date(a.saleDate || a.createdAt));
+
+    // Low stock products
+    const lowStockProducts = products.filter(p => 
+      CalculationUtils.safeNumber(p.currentStock) <= CalculationUtils.safeNumber(p.minStockLevel, 5)
+    ).slice(0, 5);
+
+    // Top products
+    const topProducts = CalculationUtils.calculateTopProducts(filteredTransactions, 10);
+
+    // Shop performance
+    const shopPerformance = CalculationUtils.calculateShopPerformance(filteredTransactions, shops);
+
+    // Cashier performance
+    const cashierPerformance = CalculationUtils.calculateCashierPerformance(filteredTransactions, cashiers);
+
+    // Credit alerts (overdue credits)
+    const creditAlerts = credits
+      .filter(credit => {
+        const isOverdue = credit.dueDate && new Date(credit.dueDate) < new Date() && 
+                         CalculationUtils.safeNumber(credit.balanceDue) > 0;
+        
+        // Apply shop filter if needed
+        if (activeFilters.shop && activeFilters.shop !== 'all') {
+          const creditShopId = credit.shopId || (credit.shop && typeof credit.shop === 'object' ? credit.shop._id : credit.shop);
+          return isOverdue && creditShopId === activeFilters.shop;
+        }
+        
+        return isOverdue;
+      })
+      .slice(0, 5);
+
+    // Enhanced financial stats with additional calculations
+    const costOfGoodsSold = financialStats.costOfGoodsSold || 
+                           filteredTransactions.reduce((sum, t) => {
+                             if (t.cost) {
+                               return sum + CalculationUtils.safeNumber(t.cost);
+                             }
+                             return sum + CalculationUtils.calculateCostFromItems(t);
+                           }, 0);
+
+    const enhancedFinancialStats = {
+      ...financialStats,
+      totalRevenue: financialStats.totalRevenue || 0,
+      netProfit: financialStats.netProfit || 0,
+      totalSales: financialStats.totalSales || filteredTransactions.length,
+      creditSales: financialStats.creditSales || filteredTransactions.filter(t => t.isCreditTransaction).reduce((sum, t) => sum + (t.totalAmount || 0), 0),
+      nonCreditSales: financialStats.nonCreditSales || filteredTransactions.filter(t => !t.isCreditTransaction).reduce((sum, t) => sum + (t.totalAmount || 0), 0),
+      outstandingCredit: financialStats.outstandingCredit || filteredTransactions.filter(t => t.isCreditTransaction).reduce((sum, t) => sum + (t.outstandingRevenue || 0), 0),
+      totalExpenses: financialStats.totalExpenses || expenses.reduce((sum, e) => sum + CalculationUtils.safeNumber(e.amount), 0),
+      costOfGoodsSold: parseFloat(costOfGoodsSold.toFixed(2)),
+      grossProfit: financialStats.grossProfit || parseFloat((enhancedFinancialStats.totalRevenue - costOfGoodsSold).toFixed(2)),
+      profitMargin: financialStats.profitMargin || CalculationUtils.calculateProfitMargin(enhancedFinancialStats.totalRevenue, enhancedFinancialStats.grossProfit)
+    };
+
+    if (!financialStats.netProfit) {
+      enhancedFinancialStats.netProfit = parseFloat((enhancedFinancialStats.grossProfit - enhancedFinancialStats.totalExpenses).toFixed(2));
+    }
+
+    // Business stats
+    const businessStats = {
+      totalProducts: products.length,
+      totalShops: shops.length,
+      totalCashiers: cashiers.length,
+      lowStockCount: lowStockProducts.length,
+      activeCredits: credits.filter(c => c.status !== 'paid' && CalculationUtils.safeNumber(c.balanceDue) > 0).length
+    };
+
+    return {
+      financialStats: enhancedFinancialStats,
+      businessStats,
+      recentTransactions,
+      lowStockProducts,
+      topProducts,
+      shopPerformance,
+      cashierPerformance,
+      creditAlerts,
+      timestamp: new Date().toISOString(),
+      appliedFilters: activeFilters,
+      dataSources: {
+        transactions: filteredTransactions.length,
+        products: products.length,
+        expenses: expenses.length,
+        credits: credits.length,
+        shops: shops.length,
+        cashiers: cashiers.length
+      }
+    };
+  };
+
+  // Auto-fetch data when filters change
+  useEffect(() => {
+    fetchAllData();
+  }, [filters.shop, filters.timeRange, filters.paymentMethod, filters.transactionType]);
+
+  // Handle filter changes
+  const handleFilterChange = (key, value) => {
+    const newFilters = { ...filters, [key]: value };
+    setFilters(newFilters);
+    
+    // Auto-refresh when filters change
+    fetchAllData(newFilters);
+  };
+
+  // Clear all filters
+  const handleClearFilters = () => {
+    const clearedFilters = {
+      dateRange: null,
+      shop: 'all',
+      paymentMethod: '',
+      transactionType: '',
+      timeRange: '30d'
+    };
+    setFilters(clearedFilters);
+    fetchAllData(clearedFilters);
+    message.info('Filters cleared - showing last 30 days data');
   };
 
   // Event handlers
@@ -1946,94 +473,91 @@ const TransactionsReport = ({ currentUser }) => {
     setViewModalVisible(true);
   }, []);
 
-  const handleDeleteTransaction = async (transactionId) => {
-    try {
-      setLoading(true);
-      await transactionAPI.delete(transactionId);
-      
-      await fetchAllData();
-      message.success('Transaction deleted successfully');
-    } catch (error) {
-      console.error('Error deleting transaction:', error);
-      message.error('Failed to delete transaction');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleExport = useCallback(() => {
-    setExportModalVisible(true);
-  }, []);
-
   const handleRefresh = useCallback(() => {
     fetchAllData();
     message.success('Data refreshed successfully');
   }, [fetchAllData]);
 
-  const clearFilters = useCallback(() => {
-    setPaymentMethodFilter('');
-    setTimeRangeFilter('yearly');
-    setSelectedShop('all');
-    setDateRange(null);
-    setSearchText('');
-    message.info('Filters cleared - showing yearly data');
-  }, []);
+  const handleExportData = async () => {
+    setExportLoading(true);
+    try {
+      const exportData = {
+        timestamp: dataTimestamp,
+        filters: filters,
+        ...comprehensiveData
+      };
 
-  // Utility functions
-  const getPaymentMethodColor = useCallback((method) => {
-    const colors = {
-      cash: 'orange',
-      mpesa: 'green',
-      bank: 'blue',
-      credit: 'red'
-    };
-    return colors[method?.toLowerCase()] || 'default';
-  }, []);
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `transaction-report-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
 
-  const getStatusColor = useCallback((status) => {
-    const colors = {
-      completed: 'green',
-      pending: 'orange',
-      refunded: 'blue',
-      cancelled: 'red'
-    };
-    return colors[status?.toLowerCase()] || 'default';
-  }, []);
+      message.success('Data exported successfully');
+    } catch (error) {
+      console.error('Export failed:', error);
+      message.error('Failed to export data');
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
-  const formatDate = useCallback((date) => {
-    if (!date) return 'N/A';
-    return dayjs(date).format('DD/MM/YYYY HH:mm');
-  }, []);
-
-  // Enhanced search functionality
-  const searchPlaceholder = "Search transactions... (product name, customer, cashier, shop, transaction ID, payment method)";
-
-  // Filtered data with enhanced search
+  // Filtered data with search
   const filteredTransactions = useMemo(() => {
-    if (!transactions || !Array.isArray(transactions)) return [];
+    if (!comprehensiveData?.recentTransactions) return [];
     
+    let filtered = comprehensiveData.recentTransactions;
+    
+    // Apply search filter
     const searchLower = searchText.toLowerCase().trim();
-    
-    if (!searchLower) return transactions;
-    
-    return transactions.filter(transaction => {
-      if (!transaction) return false;
-      
-      const searchFields = [
-        transaction.cashierName,
-        transaction.shop,
-        transaction.paymentMethod,
-        transaction.transactionNumber,
-        transaction.customerName,
-        ...(transaction.items?.map(item => item.productName) || []),
-        ...(transaction.items?.map(item => item.category) || [])
-      ].filter(Boolean).map(field => field.toLowerCase());
+    if (searchLower) {
+      filtered = filtered.filter(transaction => {
+        if (!transaction) return false;
+        
+        const searchFields = [
+          transaction.cashierName,
+          transaction.shop && typeof transaction.shop === 'string' ? transaction.shop : 
+            (transaction.shop && typeof transaction.shop === 'object' ? transaction.shop.name : ''),
+          transaction.paymentMethod,
+          transaction.transactionNumber,
+          transaction.customerName,
+          ...(transaction.items?.map(item => item.productName) || [])
+        ].filter(Boolean).map(field => field.toLowerCase());
 
-      return searchFields.some(field => field.includes(searchLower));
-    });
-  }, [transactions, searchText]);
+        return searchFields.some(field => field.includes(searchLower));
+      });
+    }
+    
+    return filtered;
+  }, [comprehensiveData, searchText]);
 
-  // UPDATED: Table columns with simplified profit calculations
+  // Transaction type counts
+  const transactionTypeCounts = useMemo(() => {
+    if (!comprehensiveData?.recentTransactions) {
+      return { total: 0, credit: 0, complete: 0 };
+    }
+    
+    const transactions = comprehensiveData.recentTransactions;
+    return {
+      total: transactions.length,
+      credit: transactions.filter(t => t.isCreditTransaction).length,
+      complete: transactions.filter(t => !t.isCreditTransaction).length
+    };
+  }, [comprehensiveData]);
+
+  // Helper functions
+  const getShopNameForDisplay = () => {
+    if (filters.shop === 'all') return 'All Shops';
+    const foundShop = shops.find(s => s._id === filters.shop);
+    return foundShop?.name || 'Selected Shop';
+  };
+
+  // Table columns
   const columns = useMemo(() => [
     {
       title: 'Transaction ID',
@@ -2053,7 +577,7 @@ const TransactionsReport = ({ currentUser }) => {
       title: 'Date & Time',
       dataIndex: 'saleDate',
       key: 'date',
-      render: formatDate,
+      render: (date, record) => record.displayDate || dayjs(date).format('DD/MM/YYYY HH:mm'),
       sorter: (a, b) => new Date(a.saleDate) - new Date(b.saleDate),
       width: 150
     },
@@ -2069,8 +593,18 @@ const TransactionsReport = ({ currentUser }) => {
       dataIndex: 'shop',
       key: 'shop',
       width: 120,
-      render: (text, record) => {
-        const shopName = text || shops.find(s => s._id === record.shopId)?.name || 'Unknown Shop';
+      render: (shop, record) => {
+        let shopName = 'Unknown Shop';
+        
+        if (typeof shop === 'string') {
+          shopName = shop;
+        } else if (shop && typeof shop === 'object' && shop.name) {
+          shopName = shop.name;
+        } else if (record.shopId) {
+          const foundShop = shops.find(s => s._id === record.shopId);
+          shopName = foundShop?.name || 'Unknown Shop';
+        }
+        
         return (
           <Tooltip title={shopName}>
             <Text ellipsis>{shopName}</Text>
@@ -2086,7 +620,17 @@ const TransactionsReport = ({ currentUser }) => {
       render: (text) => text || 'Unknown Cashier'
     },
     {
-      title: 'Revenue',
+      title: 'Transaction Type',
+      key: 'transactionType',
+      width: 120,
+      render: (_, record) => (
+        <Tag color={record.isCreditTransaction ? 'orange' : 'green'}>
+          {record.isCreditTransaction ? 'CREDIT' : 'COMPLETE'}
+        </Tag>
+      )
+    },
+    {
+      title: 'Total Amount',
       dataIndex: 'totalAmount',
       key: 'totalAmount',
       render: (amount, record) => (
@@ -2094,9 +638,9 @@ const TransactionsReport = ({ currentUser }) => {
           <Text strong style={{ color: '#1890ff' }}>
             {CalculationUtils.formatCurrency(amount)}
           </Text>
-          {record.paymentMethod === 'credit' && (
+          {record.isCreditTransaction && (
             <Text type="secondary" style={{ fontSize: '11px' }}>
-              Credit
+              Credit Sale
             </Text>
           )}
         </Space>
@@ -2105,12 +649,37 @@ const TransactionsReport = ({ currentUser }) => {
       width: 120
     },
     {
+      title: 'Recognized Revenue',
+      key: 'recognizedRevenue',
+      width: 140,
+      render: (_, record) => {
+        const isCredit = record.isCreditTransaction;
+        const recognizedRevenue = record.recognizedRevenue || record.totalAmount;
+        
+        return (
+          <Space direction="vertical" size={0}>
+            <Text strong style={{ color: '#52c41a' }}>
+              {CalculationUtils.formatCurrency(recognizedRevenue)}
+            </Text>
+            {isCredit && (
+              <Progress 
+                percent={Math.round((recognizedRevenue / record.totalAmount) * 100)} 
+                size="small" 
+                showInfo={false}
+              />
+            )}
+          </Space>
+        );
+      },
+      sorter: (a, b) => (a.recognizedRevenue || a.totalAmount || 0) - (b.recognizedRevenue || b.totalAmount || 0),
+    },
+    {
       title: 'Cost',
       dataIndex: 'cost',
       key: 'cost',
       render: (cost) => (
         <Text style={{ color: '#faad14' }}>
-          {CalculationUtils.formatCurrency(cost)}
+          {CalculationUtils.formatCurrency(cost || 0)}
         </Text>
       ),
       sorter: (a, b) => (a.cost || 0) - (b.cost || 0),
@@ -2122,7 +691,7 @@ const TransactionsReport = ({ currentUser }) => {
       key: 'profit',
       render: (profit) => (
         <Text strong style={{ color: CalculationUtils.getProfitColor(profit) }}>
-          {CalculationUtils.formatCurrency(profit)}
+          {CalculationUtils.formatCurrency(profit || 0)}
         </Text>
       ),
       sorter: (a, b) => (a.profit || 0) - (b.profit || 0),
@@ -2134,38 +703,66 @@ const TransactionsReport = ({ currentUser }) => {
       key: 'profitMargin',
       render: (margin) => (
         <Text strong style={{ color: '#3f8600' }}>
-          {margin?.toFixed(1)}%
+          {CalculationUtils.safeNumber(margin, 0).toFixed(1)}%
         </Text>
       ),
       width: 100
     },
     {
-      title: 'Payment Method',
-      dataIndex: 'paymentMethod',
-      key: 'paymentMethod',
-      render: (method, record) => {
-        const displayMethod = method === 'bank' ? 'MPESA/BANK' : method.toUpperCase();
+      title: 'Payment & Credit Status',
+      key: 'paymentCreditStatus',
+      width: 200,
+      render: (_, record) => {
+        const isCredit = record.isCreditTransaction;
+        
         return (
           <Space direction="vertical" size={0}>
-            <Tag color={getPaymentMethodColor(method)}>
-              {displayMethod}
+            <Tag color={PAYMENT_METHOD_CONFIG[record.paymentMethod]?.color || 'default'}>
+              {record.paymentMethod?.toUpperCase()}
             </Tag>
-            {method === 'credit' && record.creditStatus && (
-              <Text type="secondary" style={{ fontSize: '11px' }}>
-                {record.creditStatus}
-              </Text>
+            {isCredit && (
+              <>
+                <Tag 
+                  color={CREDIT_STATUS_CONFIG[record.creditStatus]?.color || 'orange'}
+                  style={{ fontSize: '10px', marginTop: '2px' }}
+                >
+                  {record.creditStatus?.toUpperCase() || 'PENDING'}
+                </Tag>
+                {record.outstandingRevenue > 0 && (
+                  <Text type="danger" style={{ fontSize: '10px' }}>
+                    Due: {CalculationUtils.formatCurrency(record.outstandingRevenue)}
+                  </Text>
+                )}
+              </>
             )}
           </Space>
         );
-      },
-      width: 120
+      }
+    },
+    {
+      title: 'Revenue Type',
+      key: 'revenueType',
+      width: 120,
+      render: (_, record) => {
+        if (record.isCreditTransaction) {
+          return (
+            <Space direction="vertical" size={0}>
+              <Tag color="orange">CREDIT</Tag>
+              <Text type="secondary" style={{ fontSize: '10px' }}>
+                {Math.round((record.recognizedRevenue / record.totalAmount) * 100)}% Collected
+              </Text>
+            </Space>
+          );
+        }
+        return <Tag color="green">CASH</Tag>;
+      }
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
       render: (status) => (
-        <Tag color={getStatusColor(status)}>
+        <Tag color={STATUS_CONFIG[status]?.color || 'default'}>
           {status?.toUpperCase()}
         </Tag>
       ),
@@ -2174,135 +771,715 @@ const TransactionsReport = ({ currentUser }) => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 150,
+      width: 100,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="link"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewTransaction(record)}
-            size="small"
-          >
-            View
-          </Button>
-          <Popconfirm
-            title="Delete Transaction"
-            description="Are you sure you want to delete this transaction? This action cannot be undone."
-            onConfirm={() => handleDeleteTransaction(record._id)}
-            okText="Yes"
-            cancelText="No"
-            okType="danger"
-          >
-            <Button
-              type="link"
-              danger
-              icon={<DeleteOutlined />}
-              size="small"
-            >
-              Delete
-            </Button>
-          </Popconfirm>
-        </Space>
+        <Button
+          type="link"
+          icon={<EyeOutlined />}
+          onClick={() => handleViewTransaction(record)}
+          size="small"
+        >
+          View
+        </Button>
       )
     }
-  ], [
-    formatDate, 
-    CalculationUtils.formatCurrency, 
-    CalculationUtils.getProfitColor,
-    getPaymentMethodColor, 
-    getStatusColor, 
-    handleViewTransaction,
-    handleDeleteTransaction,
-    shops
-  ]);
+  ], [shops, handleViewTransaction]);
 
-  // UPDATED: Enhanced Overview Tab with new arrangement (Credit -> Shop -> Cashier -> Product)
-  const renderOverviewTab = () => (
+  // Financial Overview Component - UPDATED: Financial Summary REMOVED
+  const FinancialOverview = () => {
+    const safeStats = comprehensiveData?.financialStats || CalculationUtils.getDefaultStatsWithCreditManagement();
+    
+    const hasData = safeStats.totalTransactions > 0 || safeStats.totalRevenue > 0;
+
+    const StatCard = ({ title, value, prefix = "KES", description, borderColor, children }) => (
+      <Col xs={24} sm={12} md={8} lg={6}>
+        <Card 
+          size="small" 
+          style={{ 
+            textAlign: 'center', 
+            borderLeft: `4px solid ${borderColor}`,
+            opacity: hasData ? 1 : 0.6
+          }}
+        >
+          <Statistic
+            title={title}
+            value={value}
+            prefix={prefix}
+            valueStyle={{ 
+              color: hasData ? borderColor : '#d9d9d9',
+              fontSize: '16px'
+            }}
+          />
+          {description && (
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              {description}
+            </Text>
+          )}
+          {children}
+          {!hasData && (
+            <Text type="secondary" style={{ fontSize: '10px', color: '#ff4d4f' }}>
+              No data
+            </Text>
+          )}
+        </Card>
+      </Col>
+    );
+
+    return (
+      <Card 
+        title={
+          <Space>
+            <DollarOutlined />
+            Financial Overview
+            {loading && <Spin size="small" />}
+            {!hasData && !loading && <Tag color="orange">No Data</Tag>}
+          </Space>
+        } 
+        style={{ marginBottom: 24 }}
+        loading={loading}
+        extra={<Text type="secondary">{getShopNameForDisplay()}</Text>}
+      >
+        {!hasData && !loading && (
+          <Alert
+            message="No Transaction Data Available"
+            description={
+              <div>
+                <p>No transactions found for the selected filters. This could be because:</p>
+                <ul>
+                  <li>No transactions have been created yet</li>
+                  <li>The selected date range has no transactions</li>
+                  <li>The selected shop has no transactions</li>
+                  <li>All transactions are in "pending" status</li>
+                </ul>
+              </div>
+            }
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
+        <Row gutter={[16, 16]}>
+          <StatCard title="Total Sales" value={safeStats.totalSales} borderColor="#1890ff" 
+            description={`${safeStats.totalTransactions || 0} transactions`} />
+          
+          <StatCard title="Credit Sales" value={safeStats.creditSales} borderColor="#fa8c16"
+            description={`${safeStats.creditSalesCount || 0} credit transactions`} />
+          
+          <StatCard title="Non-Credit Sales" value={safeStats.nonCreditSales} borderColor="#13c2c2"
+            description="Paid immediately" />
+          
+          <StatCard title="Total Revenue" value={safeStats.totalRevenue} borderColor="#52c41a"
+            description="From credit & non-credit sales" />
+          
+          <StatCard title="Expenses" value={safeStats.totalExpenses} borderColor="#cf1322"
+            description="Total operational costs" />
+          
+          <StatCard title="Gross Profit" value={safeStats.grossProfit} borderColor="#389e0d"
+            description="Revenue - Cost of Goods" />
+          
+          <StatCard title="Net Profit" value={safeStats.netProfit} borderColor="#722ed1"
+            description="After all expenses" />
+          
+          <StatCard title="Cost of Goods Sold" value={safeStats.costOfGoodsSold} borderColor="#faad14"
+            description="For credit & non-credit sales" />
+          
+          <StatCard title="Total Mpesa/Bank" value={safeStats.totalMpesaBank} borderColor="#08979c"
+            description="Digital payments" />
+          
+          <StatCard title="Total Cash" value={safeStats.totalCash} borderColor="#d48806"
+            description="Cash payments" />
+          
+          <StatCard title="Outstanding Credit" value={safeStats.outstandingCredit} borderColor="#c41d7f"
+            description="Unpaid credit balance" />
+          
+          <StatCard title="Total Credit Given" value={safeStats.totalCreditGiven} borderColor="#eb2f96"
+            description="Total credit extended" />
+        </Row>
+
+        {/* FINANCIAL SUMMARY SECTION PERMANENTLY REMOVED */}
+      </Card>
+    );
+  };
+
+  // Performance List Component
+  const PerformanceList = ({ data, title, icon, loading, renderItem, emptyDescription }) => (
+    <Card 
+      title={
+        <Space>
+          {icon}
+          {title}
+          <Badge count={data.length} showZero color="#1890ff" />
+        </Space>
+      } 
+      style={{ marginBottom: 24 }}
+      loading={loading}
+    >
+      {data.length > 0 ? (
+        <List dataSource={data} renderItem={renderItem} />
+      ) : (
+        <Empty description={emptyDescription} />
+      )}
+    </Card>
+  );
+
+  // Cashier Performance Component
+  const CashierPerformance = () => {
+    const renderCashierItem = (cashier, index) => (
+      <List.Item>
+        <List.Item.Meta
+          avatar={
+            <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
+              <Avatar 
+                style={{ 
+                  backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
+                  color: index < 3 ? '#fff' : '#000'
+                }}
+                icon={<UserOutlined />}
+              >
+                {cashier.name?.charAt(0)?.toUpperCase() || 'C'}
+              </Avatar>
+            </Badge>
+          }
+          title={
+            <Space>
+              <Text strong>{cashier.name}</Text>
+              {index < 3 && <Tag color="gold">Top Performer</Tag>}
+              <Tag color="blue">{cashier.transactions} transactions</Tag>
+            </Space>
+          }
+          description={
+            <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Total Revenue</Text>
+                  <Text strong style={{ color: '#1890ff' }}>
+                    {CalculationUtils.formatCurrency(cashier.revenue)}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Total Profit</Text>
+                  <Text strong style={{ color: CalculationUtils.getProfitColor(cashier.profit) }}>
+                    {CalculationUtils.formatCurrency(cashier.profit)}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Profit Margin</Text>
+                  <Text strong style={{ color: '#3f8600' }}>
+                    {cashier.profitMargin.toFixed(1)}%
+                  </Text>
+                </Space>
+              </Col>
+              
+              <Col xs={24} sm={12}>
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Transaction Types:</Text>
+                  <Space size={8} wrap>
+                    <Tag color="green">Complete: {cashier.completeTransactions}</Tag>
+                    <Tag color="orange">Credit: {cashier.creditTransactions}</Tag>
+                  </Space>
+                </Space>
+              </Col>
+            </Row>
+          }
+        />
+      </List.Item>
+    );
+
+    return (
+      <PerformanceList
+        data={comprehensiveData.cashierPerformance || []}
+        title="Cashier Performance"
+        icon={<UserOutlined />}
+        loading={loading}
+        renderItem={renderCashierItem}
+        emptyDescription="No cashier performance data available"
+      />
+    );
+  };
+
+  // Shop Performance Component
+  const ShopPerformance = () => {
+    const renderShopItem = (shop, index) => (
+      <List.Item>
+        <List.Item.Meta
+          avatar={
+            <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
+              <Avatar 
+                style={{ 
+                  backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
+                  color: index < 3 ? '#fff' : '#000'
+                }}
+              >
+                {shop.name?.charAt(0)?.toUpperCase() || 'S'}
+              </Avatar>
+            </Badge>
+          }
+          title={
+            <Space>
+              <Text strong>{shop.name}</Text>
+              {index < 3 && <Tag color="gold">Top Performer</Tag>}
+            </Space>
+          }
+          description={
+            <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Revenue</Text>
+                  <Text strong style={{ color: '#1890ff' }}>
+                    {CalculationUtils.formatCurrency(shop.revenue)}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Transactions</Text>
+                  <Text strong>{shop.transactions}</Text>
+                  <div style={{ marginTop: 4 }}>
+                    <Badge count={shop.completeSales} showZero size="small" color="green" />
+                    <Text type="secondary" style={{ fontSize: '10px', marginLeft: 4 }}>Complete</Text>
+                    <Badge count={shop.creditSales} showZero size="small" color="orange" style={{ marginLeft: 8 }} />
+                    <Text type="secondary" style={{ fontSize: '10px', marginLeft: 4 }}>Credit</Text>
+                  </div>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Profit Margin</Text>
+                  <Text strong style={{ color: '#3f8600' }}>
+                    {shop.profitMargin.toFixed(1)}%
+                  </Text>
+                </Space>
+              </Col>
+            </Row>
+          }
+        />
+      </List.Item>
+    );
+
+    return (
+      <PerformanceList
+        data={comprehensiveData.shopPerformance || []}
+        title="Shop Performance"
+        icon={<ShopOutlined />}
+        loading={loading}
+        renderItem={renderShopItem}
+        emptyDescription="No shop performance data available"
+      />
+    );
+  };
+
+  // Product Performance Component
+  const ProductPerformance = () => {
+    const renderProductItem = (product, index) => (
+      <List.Item>
+        <List.Item.Meta
+          avatar={
+            <Badge count={index + 1} offset={[-5, 5]} color={index < 3 ? '#1890ff' : '#d9d9d9'}>
+              <Avatar 
+                style={{ 
+                  backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
+                  color: index < 3 ? '#fff' : '#000'
+                }}
+              >
+                {product.name?.charAt(0)?.toUpperCase() || 'P'}
+              </Avatar>
+            </Badge>
+          }
+          title={
+            <Space>
+              <Text strong style={{ maxWidth: 200 }} ellipsis={{ tooltip: product.name }}>
+                {product.name}
+              </Text>
+              <Tag color="blue">{product.totalSold} units</Tag>
+              {index < 3 && <Tag color="gold">Top Seller</Tag>}
+            </Space>
+          }
+          description={
+            <Row gutter={[16, 8]} style={{ marginTop: 8, width: '100%' }}>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Revenue</Text>
+                  <Text strong style={{ color: '#1890ff' }}>
+                    {CalculationUtils.formatCurrency(product.totalRevenue)}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Profit</Text>
+                  <Text strong style={{ color: CalculationUtils.getProfitColor(product.totalProfit) }}>
+                    {CalculationUtils.formatCurrency(product.totalProfit)}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>Profit Margin</Text>
+                  <Text strong style={{ color: '#3f8600' }}>
+                    {product.profitMargin.toFixed(1)}%
+                  </Text>
+                </Space>
+              </Col>
+            </Row>
+          }
+        />
+      </List.Item>
+    );
+
+    return (
+      <PerformanceList
+        data={comprehensiveData.topProducts || []}
+        title="Top Performing Products"
+        icon={<AppstoreOutlined />}
+        loading={loading}
+        renderItem={renderProductItem}
+        emptyDescription="No product sales data available"
+      />
+    );
+  };
+
+  // Transaction Details Modal
+  const TransactionDetailsModal = ({ transaction, visible, onCancel }) => {
+    if (!transaction) return null;
+
+    const getShopName = () => {
+      if (transaction.shop && typeof transaction.shop === 'string') {
+        return transaction.shop;
+      }
+      if (transaction.shop && typeof transaction.shop === 'object' && transaction.shop.name) {
+        return transaction.shop.name;
+      }
+      if (transaction.shopId) {
+        const foundShop = shops.find(s => s._id === transaction.shopId);
+        return foundShop?.name || 'Unknown Shop';
+      }
+      return 'Unknown Shop';
+    };
+
+    const shopName = getShopName();
+    const isCredit = transaction.paymentMethod === 'credit' || transaction.isCreditTransaction;
+    const creditStatusConfig = CREDIT_STATUS_CONFIG[transaction.creditStatus] || CREDIT_STATUS_CONFIG.pending;
+    const collectionRate = isCredit && transaction.totalAmount > 0 ? 
+      (transaction.recognizedRevenue / transaction.totalAmount) * 100 : 0;
+
+    return (
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            Transaction Details
+            <Tag color={transaction.status === 'completed' ? 'green' : 'orange'}>
+              {transaction.status?.toUpperCase()}
+            </Tag>
+            {isCredit && (
+              <Tag color={creditStatusConfig.color} icon={creditStatusConfig.icon}>
+                CREDIT - {creditStatusConfig.text}
+              </Tag>
+            )}
+          </Space>
+        }
+        open={visible}
+        onCancel={onCancel}
+        footer={[
+          <Button key="close" onClick={onCancel}>
+            Close
+          </Button>
+        ]}
+        width={700}
+      >
+        <Descriptions bordered column={2} size="small">
+          <Descriptions.Item label="Transaction ID" span={2}>
+            <Text code>{transaction.transactionNumber || transaction._id}</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Date & Time">
+            {transaction.displayDate || dayjs(transaction.saleDate).format('DD/MM/YYYY HH:mm')}
+          </Descriptions.Item>
+          <Descriptions.Item label="Customer">
+            {transaction.customerName || 'Walk-in Customer'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Shop">{shopName}</Descriptions.Item>
+          <Descriptions.Item label="Cashier">
+            {transaction.cashierName || 'Unknown Cashier'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Transaction Type">
+            <Tag color={isCredit ? 'orange' : 'green'}>
+              {isCredit ? 'CREDIT SALE' : 'COMPLETE SALE'}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Payment Method">
+            <Tag color={PAYMENT_METHOD_CONFIG[transaction.paymentMethod]?.color || 'blue'}>
+              {transaction.paymentMethod?.toUpperCase()}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Total Amount">
+            <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>
+              {CalculationUtils.formatCurrency(transaction.totalAmount)}
+            </Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Cost">
+            <Text style={{ color: '#faad14' }}>
+              {CalculationUtils.formatCurrency(transaction.cost || 0)}
+            </Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Profit">
+            <Text strong style={{ color: CalculationUtils.getProfitColor(transaction.profit) }}>
+              {CalculationUtils.formatCurrency(transaction.profit || 0)}
+            </Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Profit Margin">
+            <Text strong style={{ color: '#3f8600' }}>
+              {CalculationUtils.safeNumber(transaction.profitMargin, 0).toFixed(1)}%
+            </Text>
+          </Descriptions.Item>
+          
+          {isCredit && (
+            <Descriptions.Item label="Credit Status" span={2}>
+              <Space direction="vertical">
+                <Tag color={creditStatusConfig.color} icon={creditStatusConfig.icon}>
+                  {creditStatusConfig.text.toUpperCase()}
+                </Tag>
+                {transaction.outstandingRevenue > 0 && (
+                  <Text type="danger">
+                    Outstanding: {CalculationUtils.formatCurrency(transaction.outstandingRevenue)}
+                  </Text>
+                )}
+                {transaction.recognizedRevenue > 0 && (
+                  <Text type="success">
+                    Collected: {CalculationUtils.formatCurrency(transaction.recognizedRevenue)}
+                  </Text>
+                )}
+                {collectionRate > 0 && (
+                  <Progress 
+                    percent={Math.round(collectionRate)} 
+                    size="small" 
+                    status={collectionRate >= 100 ? 'success' : 'active'}
+                    format={percent => `${percent}% Collected`}
+                  />
+                )}
+              </Space>
+            </Descriptions.Item>
+          )}
+          
+          {transaction.items && transaction.items.length > 0 && (
+            <Descriptions.Item label="Items" span={2}>
+              <List
+                size="small"
+                dataSource={transaction.items}
+                renderItem={(item, index) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={`${item.productName} (x${item.quantity})`}
+                      description={
+                        <Space>
+                          <Text>Price: {CalculationUtils.formatCurrency(item.unitPrice)}</Text>
+                          <Text>Total: {CalculationUtils.formatCurrency(item.totalPrice)}</Text>
+                          {item.profit && (
+                            <Text type="success">
+                              Profit: {CalculationUtils.formatCurrency(item.profit)}
+                            </Text>
+                          )}
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            </Descriptions.Item>
+          )}
+        </Descriptions>
+      </Modal>
+    );
+  };
+
+  // Overview Tab Content
+  const renderOverviewTab = () => {
+    return (
+      <div>
+        <FinancialOverview />
+        
+        <ShopPerformance />
+        
+        <CashierPerformance />
+        
+        <ProductPerformance />
+      </div>
+    );
+  };
+
+  // Filter Components
+  const ShopFilter = ({ value, onChange }) => (
     <div>
-      <FinancialOverview 
-        stats={stats} 
-        loading={loading} 
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
-      {/* UPDATED: Arranged from top to bottom as specified */}
-      <CreditAnalysis
-        credits={stats.credits}
-        stats={stats}
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>Select Shop:</Text>
+      </div>
+      <Select
+        value={value}
+        onChange={onChange}
+        style={{ width: '100%' }}
+        placeholder="Filter by shop"
+        allowClear
         loading={loading}
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
-      <ShopPerformance 
-        transactions={transactions} 
-        shops={shops} 
-        loading={loading}
-        selectedShop={selectedShop}
-      />
-      
-      <CashierPerformance 
-        transactions={transactions} 
-        cashiers={cashiers} 
-        loading={loading} 
-        selectedShop={selectedShop}
-        shops={shops}
-      />
-      
-      <ProductPerformance 
-        topProducts={stats.topProducts || []} 
-        loading={loading} 
-        selectedShop={selectedShop}
-        shops={shops}
-      />
+      >
+        <Option value="all">All Shops</Option>
+        {shops.map(shop => (
+          <Option key={shop._id} value={shop._id}>
+            {shop.name}
+          </Option>
+        ))}
+      </Select>
     </div>
   );
 
-  // Main render
+  const TimeRangeFilter = ({ value, onChange }) => (
+    <div>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>Select Time Range:</Text>
+      </div>
+      <Select
+        value={value}
+        onChange={onChange}
+        style={{ width: '100%' }}
+        placeholder="Choose time range"
+      >
+        {TIME_RANGE_OPTIONS.map(option => (
+          <Option key={option.value} value={option.value}>
+            {option.label}
+          </Option>
+        ))}
+      </Select>
+    </div>
+  );
+
+  const PaymentModeFilter = ({ value, onChange }) => (
+    <div>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>Payment Mode:</Text>
+      </div>
+      <Select
+        value={value}
+        onChange={onChange}
+        style={{ width: '100%' }}
+        placeholder="Filter by payment mode"
+        allowClear
+      >
+        {PAYMENT_METHOD_OPTIONS.map(option => (
+          <Option key={option.value} value={option.value}>
+            {option.label}
+          </Option>
+        ))}
+      </Select>
+    </div>
+  );
+
+  const TransactionTypeFilter = ({ value, onChange }) => (
+    <div>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>Transaction Type:</Text>
+      </div>
+      <Select
+        value={value}
+        onChange={onChange}
+        style={{ width: '100%' }}
+        placeholder="Filter by transaction type"
+        allowClear
+      >
+        {TRANSACTION_TYPE_OPTIONS.map(option => (
+          <Option key={option.value} value={option.value}>
+            {option.label}
+          </Option>
+        ))}
+      </Select>
+    </div>
+  );
+
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <Title level={2}>
-          <BarChartOutlined /> Transactions Report
+          <DollarOutlined /> Transactions Report
           {currentUser?.role === 'cashier' && <Tag color="blue" style={{ marginLeft: 8 }}>My Transactions</Tag>}
         </Title>
         
         <Space>
-          <ReportSettings settings={settings} onSettingsChange={setSettings} />
+          {/* Auto-refresh indicator - PERMANENTLY ENABLED */}
+          <Tooltip title="Auto-refresh enabled (every 30 seconds)">
+            <Badge dot status="processing" color="green">
+              <Button 
+                type="primary"
+                icon={<DollarOutlined />}
+                size="small"
+                style={{ background: '#52c41a' }}
+              >
+                Auto Refresh
+              </Button>
+            </Badge>
+          </Tooltip>
+          
+          {/* Quick Refresh button REMOVED */}
           
           <Button
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            loading={loading}
-          >
-            Refresh
-          </Button>
-          <Button
-            icon={<FilterOutlined />}
-            onClick={clearFilters}
-          >
-            Clear Filters
-          </Button>
-          <Button
-            type="primary"
-            icon={<DownloadOutlined />}
-            onClick={handleExport}
+            icon={<ExportOutlined />}
+            onClick={handleExportData}
             loading={exportLoading}
           >
-            Export Report
+            Export
           </Button>
         </Space>
       </div>
 
-      {/* Enhanced Filters Section */}
+      {/* Data Timestamp and Active Filters */}
+      <Row style={{ marginBottom: 16 }} justify="space-between" align="middle">
+        <Col>
+          {dataTimestamp && (
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              Last updated: {new Date(dataTimestamp).toLocaleString()}
+              <Tag color="green" style={{ marginLeft: 8 }}>Auto-refresh ON</Tag>
+            </Text>
+          )}
+        </Col>
+        <Col>
+          {(filters.dateRange || filters.shop !== 'all' || filters.paymentMethod || filters.transactionType) && (
+            <Space>
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                Active filters:
+              </Text>
+              {filters.dateRange && (
+                <Tag color="blue">
+                  {filters.dateRange[0].format('YYYY-MM-DD')} - {filters.dateRange[1].format('YYYY-MM-DD')}
+                </Tag>
+              )}
+              {filters.shop !== 'all' && (
+                <Tag color="green">
+                  Shop: {shops.find(s => s._id === filters.shop)?.name || filters.shop}
+                </Tag>
+              )}
+              {filters.paymentMethod && (
+                <Tag color="orange">
+                  Payment: {filters.paymentMethod.toUpperCase()}
+                </Tag>
+              )}
+              {filters.transactionType && (
+                <Tag color="purple">
+                  Type: {filters.transactionType.toUpperCase()}
+                </Tag>
+              )}
+            </Space>
+          )}
+        </Col>
+      </Row>
+
+      {/* Filters Section - ALWAYS VISIBLE */}
       <Card style={{ marginBottom: 24 }}>
         <Row gutter={[16, 16]}>
           <Col span={24}>
-            <SearchHelp />
             <Input
-              placeholder={searchPlaceholder}
+              placeholder="Search transactions... (product name, customer, cashier, shop, transaction ID)"
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -2311,42 +1488,43 @@ const TransactionsReport = ({ currentUser }) => {
             />
           </Col>
           
-          {/* Shop Filter */}
-          <Col xs={24} sm={12} md={8} lg={6}>
+          <Col xs={24} sm={12} md={6} lg={4}>
             <ShopFilter 
-              shops={shops}
-              value={selectedShop}
-              onChange={setSelectedShop}
-              loading={loading}
+              value={filters.shop}
+              onChange={(value) => handleFilterChange('shop', value)}
             />
           </Col>
 
-          {/* Time Range Filter */}
-          <Col xs={24} sm={12} md={8} lg={6}>
+          <Col xs={24} sm={12} md={6} lg={4}>
             <TimeRangeFilter 
-              value={timeRangeFilter}
-              onChange={setTimeRangeFilter}
+              value={filters.timeRange}
+              onChange={(value) => handleFilterChange('timeRange', value)}
             />
           </Col>
 
-          {/* Payment Mode Filter */}
-          <Col xs={24} sm={12} md={8} lg={6}>
+          <Col xs={24} sm={12} md={6} lg={4}>
             <PaymentModeFilter 
-              value={paymentMethodFilter}
-              onChange={setPaymentMethodFilter}
+              value={filters.paymentMethod}
+              onChange={(value) => handleFilterChange('paymentMethod', value)}
             />
           </Col>
 
-          {/* Custom Date Range - Only show when custom is selected */}
-          {timeRangeFilter === 'custom' && (
+          <Col xs={24} sm={12} md={6} lg={4}>
+            <TransactionTypeFilter 
+              value={filters.transactionType}
+              onChange={(value) => handleFilterChange('transactionType', value)}
+            />
+          </Col>
+
+          {filters.timeRange === 'custom' && (
             <Col xs={24} sm={24} md={8} lg={6}>
               <div>
                 <div style={{ marginBottom: 8 }}>
                   <Text strong>Custom Date Range:</Text>
                 </div>
                 <RangePicker
-                  onChange={setDateRange}
-                  value={dateRange}
+                  onChange={(dates) => handleFilterChange('dateRange', dates)}
+                  value={filters.dateRange}
                   style={{ width: '100%' }}
                   allowClear
                   placeholder={['Start Date', 'End Date']}
@@ -2354,28 +1532,35 @@ const TransactionsReport = ({ currentUser }) => {
               </div>
             </Col>
           )}
+
+          <Col xs={24}>
+            <div style={{ textAlign: 'right' }}>
+              <Button onClick={handleClearFilters}>
+                Clear All Filters
+              </Button>
+            </div>
+          </Col>
         </Row>
 
         {/* Active Filters Display */}
         <div style={{ marginTop: 16, padding: '12px 16px', backgroundColor: '#f0f8ff', borderRadius: 6 }}>
           <Text strong>Active Filters: </Text>
           <Tag color="blue" style={{ marginLeft: 8 }}>
-            Shop: {selectedShop === 'all' ? 'All Shops' : shops.find(s => s._id === selectedShop)?.name || 'Selected Shop'}
+            Shop: {getShopNameForDisplay()}
           </Tag>
-          {timeRangeFilter && (
+          {filters.timeRange && (
             <Tag color="blue" style={{ marginLeft: 8 }}>
-              Time Range: {timeRangeFilter === '7d' ? 'Last 7 Days' : 
-                         timeRangeFilter === '30d' ? 'Last 30 Days' : 
-                         timeRangeFilter === '90d' ? 'Last 90 Days' : 
-                         timeRangeFilter === 'yearly' ? 'This Year' : 
-                         timeRangeFilter === 'all' ? 'All Time' : 
-                         timeRangeFilter === 'custom' ? 'Custom Range' : 
-                         timeRangeFilter.toUpperCase()}
+              Time Range: {TIME_RANGE_OPTIONS.find(opt => opt.value === filters.timeRange)?.label || filters.timeRange.toUpperCase()}
             </Tag>
           )}
-          {paymentMethodFilter && (
+          {filters.paymentMethod && (
             <Tag color="green" style={{ marginLeft: 8 }}>
-              Payment Mode: {paymentMethodFilter.toUpperCase()}
+              Payment Mode: {filters.paymentMethod.toUpperCase()}
+            </Tag>
+          )}
+          {filters.transactionType && (
+            <Tag color="purple" style={{ marginLeft: 8 }}>
+              Transaction Type: {filters.transactionType.toUpperCase()}
             </Tag>
           )}
           {searchText && (
@@ -2383,21 +1568,15 @@ const TransactionsReport = ({ currentUser }) => {
               Search: "{searchText}"
             </Tag>
           )}
-          {dateRange && dateRange.length === 2 && timeRangeFilter === 'custom' && (
-            <Tag color="purple" style={{ marginLeft: 8 }}>
-              Dates: {dayjs(dateRange[0]).format('DD/MM/YYYY')} - {dayjs(dateRange[1]).format('DD/MM/YYYY')}
-            </Tag>
-          )}
-          {stats.creditSalesCount > 0 && (
-            <Tag color="orange" style={{ marginLeft: 8 }}>
-              Credit Sales: {stats.creditSalesCount}
-            </Tag>
-          )}
-          {currentUser?.role === 'cashier' && (
-            <Tag color="blue" style={{ marginLeft: 8 }}>
-              My Transactions Only
-            </Tag>
-          )}
+          <div style={{ marginTop: 8 }}>
+            <Text strong>Transaction Counts: </Text>
+            <Badge count={transactionTypeCounts.complete} showZero color="green" />
+            <Text type="secondary" style={{ fontSize: '12px', marginLeft: 4 }}>Complete</Text>
+            <Badge count={transactionTypeCounts.credit} showZero color="orange" style={{ marginLeft: 8 }} />
+            <Text type="secondary" style={{ fontSize: '12px', marginLeft: 4 }}>Credit</Text>
+            <Badge count={transactionTypeCounts.total} showZero color="blue" style={{ marginLeft: 8 }} />
+            <Text type="secondary" style={{ fontSize: '12px', marginLeft: 4 }}>Total</Text>
+          </div>
         </div>
       </Card>
 
@@ -2412,10 +1591,12 @@ const TransactionsReport = ({ currentUser }) => {
         />
       )}
 
-      {loading ? (
+      {loading && !comprehensiveData.recentTransactions.length ? (
         <div style={{ textAlign: 'center', padding: '50px' }}>
           <Spin size="large" />
-          <div style={{ marginTop: 16 }}>Loading transactions data...</div>
+          <div style={{ marginTop: 16 }}>
+            Loading comprehensive transaction data with credit management integration...
+          </div>
         </div>
       ) : (
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
@@ -2424,9 +1605,12 @@ const TransactionsReport = ({ currentUser }) => {
               <span>
                 <PieChartOutlined />
                 Comprehensive Overview
-                <Badge count={transactions.length} overflowCount={999} style={{ marginLeft: 8 }} />
-                {stats.creditSalesCount > 0 && (
-                  <Badge count={stats.creditSalesCount} overflowCount={999} style={{ marginLeft: 4, backgroundColor: '#faad14' }} />
+                <Badge count={comprehensiveData?.recentTransactions?.length || 0} overflowCount={999} style={{ marginLeft: 8 }} />
+                {comprehensiveData?.financialStats?.creditSalesCount > 0 && (
+                  <Badge count={comprehensiveData.financialStats.creditSalesCount} overflowCount={999} style={{ marginLeft: 4, backgroundColor: '#faad14' }} />
+                )}
+                {comprehensiveData?.financialStats?.completeTransactionsCount > 0 && (
+                  <Badge count={comprehensiveData.financialStats.completeTransactionsCount} overflowCount={999} style={{ marginLeft: 4, backgroundColor: '#52c41a' }} />
                 )}
               </span>
             } 
@@ -2441,6 +1625,12 @@ const TransactionsReport = ({ currentUser }) => {
                 <TableOutlined />
                 Detailed Transactions
                 <Badge count={filteredTransactions.length} overflowCount={999} style={{ marginLeft: 8 }} />
+                {transactionTypeCounts.credit > 0 && (
+                  <Badge count={transactionTypeCounts.credit} overflowCount={999} style={{ marginLeft: 4, backgroundColor: '#faad14' }} />
+                )}
+                {transactionTypeCounts.complete > 0 && (
+                  <Badge count={transactionTypeCounts.complete} overflowCount={999} style={{ marginLeft: 4, backgroundColor: '#52c41a' }} />
+                )}
               </span>
             } 
             key="details"
@@ -2448,32 +1638,24 @@ const TransactionsReport = ({ currentUser }) => {
             <Card>
               <div style={{ marginBottom: 16 }}>
                 <Text strong>
-                  Showing {filteredTransactions.length} of {transactions.length} transactions
-                  {selectedShop !== 'all' && (
-                    <Text type="secondary"> for {shops.find(s => s._id === selectedShop)?.name || 'Selected Shop'}</Text>
+                  Showing {filteredTransactions.length} of {comprehensiveData?.recentTransactions?.length || 0} transactions
+                  {filters.shop !== 'all' && (
+                    <Text type="secondary"> for {getShopNameForDisplay()}</Text>
                   )}
-                  {timeRangeFilter === 'all' ? (
-                    <Text type="secondary"> for all time</Text>
-                  ) : (
-                    <Text type="secondary"> for the selected period</Text>
-                  )}
-                  {searchText && (
-                    <Text type="secondary"> matching "{searchText}"</Text>
+                  {comprehensiveData?.financialStats && (
+                    <Text type="secondary">
+                      {' '}• Total Revenue: {CalculationUtils.formatCurrency(comprehensiveData.financialStats.totalRevenue)} • 
+                      Net Profit: {CalculationUtils.formatCurrency(comprehensiveData.financialStats.netProfit)} • 
+                      Items Sold: {comprehensiveData.financialStats.totalItemsSold}
+                      {comprehensiveData.financialStats.creditSalesCount > 0 && (
+                        <span> • Credit Sales: {comprehensiveData.financialStats.creditSalesCount}</span>
+                      )}
+                      {comprehensiveData.financialStats.completeTransactionsCount > 0 && (
+                        <span> • Complete Sales: {comprehensiveData.financialStats.completeTransactionsCount}</span>
+                      )}
+                    </Text>
                   )}
                 </Text>
-                <div style={{ marginTop: 8 }}>
-                  <Text type="secondary">
-                    Total Revenue: {CalculationUtils.formatCurrency(stats.totalRevenue)} | 
-                    Total Profit: {CalculationUtils.formatCurrency(stats.netProfit)} | 
-                    Items Sold: {stats.totalItemsSold} |
-                    Avg. Transaction: {CalculationUtils.formatCurrency(stats.averageTransactionValue)}
-                    {stats.creditSalesCount > 0 && (
-                      <Text type="secondary" style={{ marginLeft: 8 }}>
-                        | Credit Sales: {stats.creditSalesCount} ({CalculationUtils.formatCurrency(stats.totalCreditAmount)})
-                      </Text>
-                    )}
-                  </Text>
-                </div>
               </div>
               <Table
                 columns={columns}
@@ -2485,11 +1667,11 @@ const TransactionsReport = ({ currentUser }) => {
                   showSizeChanger: true,
                   showQuickJumper: true,
                   showTotal: (total, range) =>
-                    `${range[0]}-${range[1]} of ${total} transactions`
+                    `${range[0]}-${range[1]} of ${total} transactions (${transactionTypeCounts.complete} complete, ${transactionTypeCounts.credit} credit)`
                 }}
-                scroll={{ x: 1500 }}
+                scroll={{ x: 2000 }}
                 locale={{ 
-                  emptyText: filteredTransactions.length === 0 && transactions.length > 0 ? 
+                  emptyText: filteredTransactions.length === 0 && comprehensiveData?.recentTransactions?.length > 0 ? 
                     'No transactions match your search' : 
                     'No transactions found'
                 }}
@@ -2503,25 +1685,6 @@ const TransactionsReport = ({ currentUser }) => {
         transaction={selectedTransaction}
         visible={viewModalVisible}
         onCancel={() => setViewModalVisible(false)}
-        shops={shops}
-      />
-
-      <ExportReportModal
-        visible={exportModalVisible}
-        onCancel={() => setExportModalVisible(false)}
-        data={{ 
-          transactions: filteredTransactions, 
-          stats: stats
-        }}
-        filters={{ 
-          dateRange, 
-          paymentMethodFilter,
-          timeRangeFilter,
-          searchText 
-        }}
-        selectedShop={selectedShop}
-        shops={shops}
-        loading={exportLoading}
       />
     </div>
   );

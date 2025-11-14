@@ -1,4 +1,4 @@
-
+// src/pages/Admin/AdminDashboard.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Layout, Menu, Typography, Card, Row, Col, Table, Tag, Statistic, List, Alert, Spin, 
@@ -31,18 +31,18 @@ import {
   CreditCardOutlined,
   SearchOutlined,
   TeamOutlined,
-  FilterOutlined
+  FilterOutlined,
+  BankOutlined,
+  CreditCardFilled,
+  WalletOutlined
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
-  transactionAPI, 
-  productAPI, 
+  unifiedAPI, 
   shopAPI, 
-  cashierAPI, 
-  expenseAPI,
-  creditAPI,
-  reportAPI
+  reportAPI 
 } from '../../services/api';
+import { CalculationUtils } from '../../utils/calculationUtils';
 import './AdminDashboard.css';
 
 const { Header, Sider, Content } = Layout;
@@ -52,383 +52,7 @@ const { Search } = Input;
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
-// Enhanced Calculation Utilities with Credit Sales Support
-const CalculationUtils = {
-  safeNumber: (value, fallback = 0) => {
-    if (value === null || value === undefined || value === '') return fallback;
-    const num = Number(value);
-    return isNaN(num) ? fallback : num;
-  },
-
-  formatCurrency: (amount) => {
-    const value = CalculationUtils.safeNumber(amount);
-    return `KES ${value.toLocaleString('en-KE', { 
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2 
-    })}`;
-  },
-
-  getProfitColor: (profit) => {
-    const value = CalculationUtils.safeNumber(profit);
-    if (value > 0) return '#3f8600';
-    if (value < 0) return '#cf1322';
-    return '#d9d9d9';
-  },
-
-  getProfitIcon: (profit) => {
-    const value = CalculationUtils.safeNumber(profit);
-    return value >= 0 ? <RiseOutlined /> : <FallOutlined />;
-  },
-
-  calculateProfit: (revenue, cost) => {
-    const revenueNum = CalculationUtils.safeNumber(revenue);
-    const costNum = CalculationUtils.safeNumber(cost);
-    return revenueNum - costNum;
-  },
-
-  calculateProfitMargin: (revenue, profit) => {
-    const revenueNum = CalculationUtils.safeNumber(revenue);
-    const profitNum = CalculationUtils.safeNumber(profit);
-    if (revenueNum <= 0) return 100.0;
-    return (profitNum / revenueNum) * 100;
-  },
-
-  // Calculate Cost of Goods Sold from transaction items
-  calculateCOGS: (transactions, products = []) => {
-    let totalCOGS = 0;
-    
-    transactions.forEach(transaction => {
-      transaction.items?.forEach(item => {
-        // Find product to get accurate buying price
-        const product = products.find(p => 
-          p._id === (item.productId || item.product) || 
-          p.name === item.productName
-        );
-        
-        const buyingPrice = CalculationUtils.safeNumber(
-          product?.buyingPrice || item.buyingPrice || item.costPrice || 0
-        );
-        const quantity = CalculationUtils.safeNumber(item.quantity, 1);
-        const itemCOGS = buyingPrice * quantity;
-        
-        totalCOGS += itemCOGS;
-      });
-    });
-    
-    return totalCOGS;
-  },
-
-  // FIXED: Enhanced data processing with credit sales included in total revenue
-  processDashboardData: (comprehensiveData, creditsData = [], shops = [], filters = {}) => {
-    console.log('🚀 Processing dashboard data with credit sales support...', { filters });
-    
-    let transactions = comprehensiveData?.transactions || [];
-    const products = comprehensiveData?.products || [];
-    const expenses = comprehensiveData?.expenses || [];
-    const cashiers = comprehensiveData?.cashiers || [];
-
-    // Apply filters
-    if (filters.dateRange && filters.dateRange[0] && filters.dateRange[1]) {
-      transactions = transactions.filter(transaction => {
-        const transactionDate = new Date(transaction.saleDate || transaction.createdAt);
-        return transactionDate >= filters.dateRange[0] && transactionDate <= filters.dateRange[1];
-      });
-    }
-
-    if (filters.shop && filters.shop !== 'all') {
-      transactions = transactions.filter(transaction => {
-        const shopId = transaction.shopId || transaction.shop;
-        return shopId === filters.shop;
-      });
-    }
-
-    console.log('📊 Filtered data:', {
-      transactions: transactions.length,
-      products: products.length,
-      expenses: expenses.length,
-      shops: shops.length,
-      cashiers: cashiers.length,
-      credits: creditsData.length
-    });
-
-    // Calculate COGS from transaction items
-    const totalCOGS = CalculationUtils.calculateCOGS(transactions, products);
-    
-    let totalRevenue = 0;
-    let totalItemsSold = 0;
-    let cashRevenue = 0;
-    let bankMpesaRevenue = 0;
-    let creditRevenue = 0; // NEW: Track credit sales revenue
-
-    const processedTransactions = transactions.map(transaction => {
-      // Calculate transaction-level metrics
-      const transactionRevenue = CalculationUtils.safeNumber(transaction.totalAmount);
-      const transactionItemsCount = CalculationUtils.safeNumber(transaction.itemsCount) ||
-        transaction.items?.reduce((sum, item) => sum + CalculationUtils.safeNumber(item.quantity, 1), 0) || 0;
-
-      // Calculate transaction COGS
-      const transactionCOGS = transaction.items?.reduce((sum, item) => {
-        const product = products.find(p => 
-          p._id === (item.productId || item.product) || 
-          p.name === item.productName
-        );
-        const buyingPrice = CalculationUtils.safeNumber(
-          product?.buyingPrice || item.buyingPrice || item.costPrice || 0
-        );
-        const quantity = CalculationUtils.safeNumber(item.quantity, 1);
-        return sum + (buyingPrice * quantity);
-      }, 0) || 0;
-
-      // FIXED: Accumulate totals - include ALL sales in total revenue regardless of payment method
-      totalRevenue += transactionRevenue;
-      totalItemsSold += transactionItemsCount;
-
-      // Track revenue by payment method
-      const paymentMethod = transaction.paymentMethod?.toLowerCase() || 'cash';
-      if (paymentMethod === 'credit') {
-        creditRevenue += transactionRevenue;
-      } else if (paymentMethod === 'bank_mpesa') {
-        bankMpesaRevenue += transactionRevenue;
-      } else if (paymentMethod === 'cash_bank_mpesa') {
-        // For split payments, add to both cash and bank/mpesa
-        cashRevenue += CalculationUtils.safeNumber(transaction.cashAmount);
-        bankMpesaRevenue += CalculationUtils.safeNumber(transaction.bankMpesaAmount);
-      } else {
-        cashRevenue += transactionRevenue;
-      }
-
-      // Map shop ID to shop name
-      const shopId = transaction.shopId || transaction.shop;
-      let shopName = 'Unknown Shop';
-      
-      if (shopId && shops.length > 0) {
-        const foundShop = shops.find(shop => 
-          shop._id === shopId || 
-          shop.name === shopId ||
-          (shop._id && shop._id.toString() === shopId.toString())
-        );
-        shopName = foundShop?.name || shopId;
-      } else if (transaction.shop && typeof transaction.shop === 'string' && transaction.shop !== 'Unknown Shop') {
-        shopName = transaction.shop;
-      }
-
-      return {
-        ...transaction,
-        cost: transactionCOGS,
-        itemsCount: transactionItemsCount,
-        shop: shopName,
-        shopName: shopName,
-        displayShop: shopName,
-        profit: CalculationUtils.calculateProfit(transactionRevenue, transactionCOGS),
-        profitMargin: CalculationUtils.calculateProfitMargin(transactionRevenue, CalculationUtils.calculateProfit(transactionRevenue, transactionCOGS))
-      };
-    });
-
-    console.log('💰 Revenue Calculation Results:', {
-      totalRevenue,
-      totalCOGS,
-      totalItemsSold,
-      cashRevenue,
-      bankMpesaRevenue,
-      creditRevenue, // NEW: Credit sales included in total revenue
-      transactionCount: transactions.length
-    });
-
-    // Calculate financial metrics
-    const totalProfit = CalculationUtils.calculateProfit(totalRevenue, totalCOGS);
-    
-    // Filter expenses by date range and shop
-    let filteredExpenses = expenses;
-    if (filters.dateRange && filters.dateRange[0] && filters.dateRange[1]) {
-      filteredExpenses = expenses.filter(expense => {
-        const expenseDate = new Date(expense.date || expense.createdAt);
-        return expenseDate >= filters.dateRange[0] && expenseDate <= filters.dateRange[1];
-      });
-    }
-    if (filters.shop && filters.shop !== 'all') {
-      filteredExpenses = filteredExpenses.filter(expense => expense.shop === filters.shop);
-    }
-    
-    const totalExpenses = filteredExpenses.reduce((sum, e) => sum + CalculationUtils.safeNumber(e.amount), 0);
-    const netProfit = CalculationUtils.calculateProfit(totalProfit, totalExpenses);
-    const profitMargin = CalculationUtils.calculateProfitMargin(totalRevenue, netProfit);
-    const totalSales = transactions.length;
-
-    // Credit calculations
-    let filteredCredits = creditsData;
-    if (filters.dateRange && filters.dateRange[0] && filters.dateRange[1]) {
-      filteredCredits = creditsData.filter(credit => {
-        const creditDate = new Date(credit.date || credit.createdAt);
-        return creditDate >= filters.dateRange[0] && creditDate <= filters.dateRange[1];
-      });
-    }
-    
-    const totalCredits = filteredCredits.length;
-    const totalCreditAmount = filteredCredits.reduce((sum, c) => sum + CalculationUtils.safeNumber(c.totalAmount), 0);
-    const totalAmountPaid = filteredCredits.reduce((sum, c) => sum + CalculationUtils.safeNumber(c.amountPaid), 0);
-    const totalBalanceDue = filteredCredits.reduce((sum, c) => sum + CalculationUtils.safeNumber(c.balanceDue), 0);
-    const overdueCredits = filteredCredits.filter(c => 
-      c.dueDate && new Date(c.dueDate) < new Date() && CalculationUtils.safeNumber(c.balanceDue) > 0
-    ).length;
-
-    // Product analysis with filters
-    let filteredProducts = products;
-    if (filters.shop && filters.shop !== 'all') {
-      // Filter products by shop if needed
-      filteredProducts = products.filter(p => p.shop === filters.shop);
-    }
-    
-    const lowStockProducts = filteredProducts.filter(p => 
-      CalculationUtils.safeNumber(p.currentStock) <= CalculationUtils.safeNumber(p.minStockLevel, 5)
-    );
-
-    // Recent transactions (last 10) with proper shop names
-    const recentTransactions = processedTransactions
-      .sort((a, b) => new Date(b.saleDate || b.createdAt) - new Date(a.saleDate || a.createdAt))
-      .slice(0, 10);
-
-    const result = {
-      financialStats: {
-        // FIXED: totalRevenue now includes credit sales
-        totalRevenue: parseFloat(totalRevenue.toFixed(2)),
-        totalCOGS: parseFloat(totalCOGS.toFixed(2)),
-        totalProfit: parseFloat(totalProfit.toFixed(2)),
-        totalExpenses: parseFloat(totalExpenses.toFixed(2)),
-        netProfit: parseFloat(netProfit.toFixed(2)),
-        profitMargin: parseFloat(profitMargin.toFixed(2)),
-        totalSales: totalSales,
-        totalItemsSold: totalItemsSold,
-        averageTransactionValue: totalSales > 0 ? totalRevenue / totalSales : 0,
-        
-        // NEW: Payment method breakdown
-        cashRevenue: parseFloat(cashRevenue.toFixed(2)),
-        bankMpesaRevenue: parseFloat(bankMpesaRevenue.toFixed(2)),
-        creditRevenue: parseFloat(creditRevenue.toFixed(2)),
-        
-        // Credit stats
-        totalCredits,
-        totalCreditAmount: parseFloat(totalCreditAmount.toFixed(2)),
-        totalAmountPaid: parseFloat(totalAmountPaid.toFixed(2)),
-        totalBalanceDue: parseFloat(totalBalanceDue.toFixed(2)),
-        overdueCredits,
-        creditCollectionRate: totalCreditAmount > 0 ? (totalAmountPaid / totalCreditAmount) * 100 : 0
-      },
-      businessStats: {
-        totalProducts: filteredProducts.length,
-        totalShops: shops.length,
-        totalCashiers: cashiers.length,
-        lowStockCount: lowStockProducts.length,
-        activeCredits: filteredCredits.filter(c => c.status !== 'paid').length
-      },
-      recentTransactions,
-      lowStockProducts: lowStockProducts.slice(0, 5),
-      topProducts: CalculationUtils.quickTopProducts(processedTransactions, 5),
-      shopPerformance: CalculationUtils.quickShopPerformance(processedTransactions, shops),
-      creditAlerts: filteredCredits.filter(c => 
-        c.dueDate && new Date(c.dueDate) < new Date() && CalculationUtils.safeNumber(c.balanceDue) > 0
-      ).slice(0, 5),
-      timestamp: new Date().toISOString(),
-      appliedFilters: filters
-    };
-
-    console.log('✅ Final financial stats with credit sales:', result.financialStats);
-    return result;
-  },
-
-  // Quick top products calculation
-  quickTopProducts: (transactions, limit = 5) => {
-    const productSales = {};
-    
-    transactions.forEach(transaction => {
-      transaction.items?.forEach(item => {
-        const productName = item.productName || 'Unknown Product';
-        if (!productSales[productName]) {
-          productSales[productName] = {
-            name: productName,
-            quantity: 0,
-            revenue: 0,
-            cost: 0,
-            profit: 0
-          };
-        }
-        const itemQuantity = CalculationUtils.safeNumber(item.quantity, 1);
-        const itemRevenue = CalculationUtils.safeNumber(item.totalPrice || item.price);
-        const itemCost = CalculationUtils.safeNumber(item.buyingPrice || item.costPrice || 0) * itemQuantity;
-        
-        productSales[productName].quantity += itemQuantity;
-        productSales[productName].revenue += itemRevenue;
-        productSales[productName].cost += itemCost;
-        productSales[productName].profit += (itemRevenue - itemCost);
-      });
-    });
-
-    return Object.values(productSales)
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, limit);
-  },
-
-  // Shop performance calculation
-  quickShopPerformance: (transactions, shops) => {
-    const shopPerformance = {};
-    
-    transactions.forEach(transaction => {
-      const shopName = transaction.shop || transaction.shopName || 'Unknown Shop';
-      if (!shopPerformance[shopName]) {
-        shopPerformance[shopName] = {
-          name: shopName,
-          revenue: 0,
-          cost: 0,
-          profit: 0,
-          transactions: 0,
-          itemsSold: 0
-        };
-      }
-      shopPerformance[shopName].revenue += CalculationUtils.safeNumber(transaction.totalAmount);
-      shopPerformance[shopName].cost += CalculationUtils.safeNumber(transaction.cost);
-      shopPerformance[shopName].profit += CalculationUtils.safeNumber(transaction.profit);
-      shopPerformance[shopName].transactions += 1;
-      shopPerformance[shopName].itemsSold += CalculationUtils.safeNumber(transaction.itemsCount);
-    });
-
-    return Object.values(shopPerformance)
-      .map(shop => ({
-        ...shop,
-        profitMargin: CalculationUtils.calculateProfitMargin(shop.revenue, shop.profit)
-      }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5);
-  },
-
-  getDefaultStats: () => ({
-    totalSales: 0,
-    totalRevenue: 0,
-    totalCOGS: 0,
-    totalProfit: 0,
-    totalExpenses: 0,
-    netProfit: 0,
-    profitMargin: 0,
-    totalProducts: 0,
-    totalShops: 0,
-    totalCashiers: 0,
-    lowStockCount: 0,
-    totalItemsSold: 0,
-    averageTransactionValue: 0,
-    // NEW: Payment method revenue
-    cashRevenue: 0,
-    bankMpesaRevenue: 0,
-    creditRevenue: 0,
-    // Credit stats
-    totalCredits: 0,
-    totalCreditAmount: 0,
-    totalAmountPaid: 0,
-    totalBalanceDue: 0,
-    overdueCredits: 0,
-    creditCollectionRate: 0,
-    timestamp: new Date().toISOString()
-  })
-};
-
-// Enhanced Admin Dashboard Component with Credit Sales Support
+// Enhanced Admin Dashboard Component with Unified API Integration
 const AdminDashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -437,7 +61,7 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState({
-    financialStats: CalculationUtils.getDefaultStats(),
+    financialStats: CalculationUtils.getDefaultStatsWithCreditManagement(),
     businessStats: {
       totalProducts: 0,
       totalShops: 0,
@@ -449,7 +73,8 @@ const AdminDashboard = () => {
     lowStockProducts: [],
     topProducts: [],
     shopPerformance: [],
-    creditAlerts: []
+    creditAlerts: [],
+    cashierPerformance: []
   });
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [viewModalContent, setViewModalContent] = useState(null);
@@ -495,45 +120,54 @@ const AdminDashboard = () => {
     };
   }, [filters.autoRefresh]);
 
-  // Enhanced data fetching with credit sales support
+  // ENHANCED: Data fetching with unified API integration
   const fetchDashboardData = async (customFilters = null) => {
     const activeFilters = customFilters || filters;
     
-    console.log('🚀 Fetching dashboard data with credit sales support...', activeFilters);
+    console.log('🚀 Fetching dashboard data with unified API...', activeFilters);
     
     try {
       setLoading(true);
       setRefreshing(true);
       
-      // Fetch shops first
+      // Fetch shops first for filtering
       const shopsData = await shopAPI.getAll();
       setShops(shopsData);
 
-      // Use optimized reports endpoint
-      const optimizedData = await reportAPI.getDashboardData();
+      // Build params for unified API
+      const params = {};
       
-      // Process data with filters - FIXED: Now includes credit sales in revenue
-      const processedData = CalculationUtils.processDashboardData(
-        {
-          transactions: optimizedData.comprehensiveData?.transactions || [],
-          products: optimizedData.comprehensiveData?.products || [],
-          expenses: optimizedData.comprehensiveData?.expenses || [],
-          cashiers: optimizedData.cashiers || []
-        },
-        optimizedData.credits || [],
-        shopsData,
-        activeFilters
-      );
+      // Apply date range filter
+      if (activeFilters.dateRange && activeFilters.dateRange[0] && activeFilters.dateRange[1]) {
+        params.startDate = activeFilters.dateRange[0].format('YYYY-MM-DD');
+        params.endDate = activeFilters.dateRange[1].format('YYYY-MM-DD');
+      }
+      
+      // Apply shop filter
+      if (activeFilters.shop && activeFilters.shop !== 'all') {
+        params.shopId = activeFilters.shop;
+      }
+
+      // Use unified API endpoint (same as Transaction Report)
+      const comprehensiveData = await unifiedAPI.getCombinedTransactions(params);
+      
+      console.log('📊 Unified API response:', {
+        transactions: comprehensiveData.salesWithProfit?.length,
+        financialStats: comprehensiveData.financialStats,
+        hasEnhancedStats: !!comprehensiveData.enhancedStats
+      });
+
+      // Process data using the same utility as Transaction Report
+      const processedData = processDashboardData(comprehensiveData, shopsData, activeFilters);
 
       setDashboardData(processedData);
       setDataTimestamp(new Date().toISOString());
       
-      console.log('✅ Dashboard data processed with credit sales:', {
+      console.log('✅ Dashboard data processed:', {
         totalRevenue: processedData.financialStats.totalRevenue,
-        cashRevenue: processedData.financialStats.cashRevenue,
-        bankMpesaRevenue: processedData.financialStats.bankMpesaRevenue,
-        creditRevenue: processedData.financialStats.creditRevenue,
-        netProfit: processedData.financialStats.netProfit
+        netProfit: processedData.financialStats.netProfit,
+        creditSales: processedData.financialStats.creditSales,
+        recentTransactions: processedData.recentTransactions.length
       });
       
       message.success(`Dashboard refreshed - ${processedData.financialStats.totalSales} transactions`);
@@ -547,32 +181,20 @@ const AdminDashboard = () => {
     }
   };
 
-  // Fallback with filters
+  // ENHANCED: Fallback with unified API structure
   const fetchDataWithFallback = async (activeFilters) => {
     try {
-      const [comprehensiveData, creditsData, shopsData] = await Promise.all([
-        transactionAPI.getComprehensiveData().catch(err => {
-          console.error('Comprehensive data error:', err);
-          return { transactions: [], products: [], expenses: [] };
-        }),
-        creditAPI.getAll().catch(err => {
-          console.error('Credits data error:', err);
-          return [];
-        }),
-        shopAPI.getAll().catch(err => {
-          console.error('Shops data error:', err);
-          return [];
-        })
-      ]);
-
+      const shopsData = await shopAPI.getAll();
       setShops(shopsData);
 
-      const processedData = CalculationUtils.processDashboardData(
-        comprehensiveData,
-        creditsData,
-        shopsData,
-        activeFilters
-      );
+      // Build basic params for fallback
+      const params = {};
+      if (activeFilters.shop && activeFilters.shop !== 'all') {
+        params.shopId = activeFilters.shop;
+      }
+
+      const comprehensiveData = await unifiedAPI.getCombinedTransactions(params);
+      const processedData = processDashboardData(comprehensiveData, shopsData, activeFilters);
 
       setDashboardData(processedData);
       setDataTimestamp(new Date().toISOString());
@@ -580,8 +202,170 @@ const AdminDashboard = () => {
     } catch (fallbackError) {
       console.error('💥 Fallback data fetch failed:', fallbackError);
       message.error('Failed to load dashboard data');
+      
+      // Set empty data structure
+      setDashboardData({
+        financialStats: CalculationUtils.getDefaultStatsWithCreditManagement(),
+        businessStats: {
+          totalProducts: 0,
+          totalShops: 0,
+          totalCashiers: 0,
+          lowStockCount: 0,
+          activeCredits: 0
+        },
+        recentTransactions: [],
+        lowStockProducts: [],
+        topProducts: [],
+        shopPerformance: [],
+        creditAlerts: [],
+        cashierPerformance: []
+      });
     }
   };
+
+// ENHANCED: Dashboard data processing aligned with Transaction Report
+const processDashboardData = (comprehensiveData, shops, activeFilters) => {
+  console.log('🔄 Processing dashboard data with unified structure...');
+  
+  // Use the same data processing as Transaction Report
+  const processedData = CalculationUtils.processComprehensiveData(
+    comprehensiveData, 
+    activeFilters.shop === 'all' ? null : activeFilters.shop,
+    { 
+      includePerformance: true,
+      includeProducts: true 
+    }
+  );
+
+  // Extract data from processed structure
+  const transactions = processedData.salesWithProfit || [];
+  const financialStats = processedData.financialStats || CalculationUtils.getDefaultStatsWithCreditManagement();
+  const products = processedData.products || [];
+  const expenses = processedData.expenses || [];
+  const credits = processedData.credits || [];
+  const cashiers = processedData.cashiers || [];
+
+  console.log('📈 Processed data extracted:', {
+    transactions: transactions.length,
+    products: products.length,
+    expenses: expenses.length,
+    credits: credits.length,
+    cashiers: cashiers.length
+  });
+
+  // Apply date range filter to transactions if needed
+  let filteredTransactions = transactions;
+  if (activeFilters.dateRange && activeFilters.dateRange[0] && activeFilters.dateRange[1]) {
+    filteredTransactions = CalculationUtils.filterDataByDateRange(
+      transactions,
+      activeFilters.dateRange[0],
+      activeFilters.dateRange[1],
+      'saleDate'
+    );
+  }
+
+  // Recent transactions (last 10)
+  const recentTransactions = filteredTransactions
+    .sort((a, b) => new Date(b.saleDate || b.createdAt) - new Date(a.saleDate || a.createdAt))
+    .slice(0, 10);
+
+  // Low stock products
+  const lowStockProducts = products.filter(p => 
+    CalculationUtils.safeNumber(p.currentStock) <= CalculationUtils.safeNumber(p.minStockLevel, 5)
+  ).slice(0, 5);
+
+  // Top products using same calculation as Transaction Report
+  const topProducts = CalculationUtils.calculateTopProducts(filteredTransactions, 5);
+
+  // Shop performance using same calculation as Transaction Report
+  const shopPerformance = CalculationUtils.calculateShopPerformance(filteredTransactions, shops);
+
+  // Cashier performance using same calculation as Transaction Report
+  const cashierPerformance = CalculationUtils.calculateCashierPerformance(filteredTransactions, cashiers);
+
+  // Credit alerts (overdue credits)
+  const creditAlerts = credits
+    .filter(credit => {
+      const isOverdue = credit.dueDate && new Date(credit.dueDate) < new Date() && 
+                       CalculationUtils.safeNumber(credit.balanceDue) > 0;
+      
+      // Apply shop filter if needed
+      if (activeFilters.shop && activeFilters.shop !== 'all') {
+        const creditShopId = credit.shopId || (credit.shop && typeof credit.shop === 'object' ? credit.shop._id : credit.shop);
+        return isOverdue && creditShopId === activeFilters.shop;
+      }
+      
+      return isOverdue;
+    })
+    .slice(0, 5);
+
+  // ENHANCE COGS CALCULATION: Use the same robust calculation as in calculateFinancialStatsWithCreditManagement
+  const costOfGoodsSold = financialStats.costOfGoodsSold || 
+                         filteredTransactions.reduce((sum, t) => {
+                           // Calculate from transaction cost or items using the same logic as in main calculations
+                           if (t.cost) {
+                             return sum + CalculationUtils.safeNumber(t.cost);
+                           }
+                           
+                           // Calculate from items as fallback using the utility function
+                           return sum + CalculationUtils.calculateCostFromItems(t);
+                         }, 0);
+
+  // Enhanced financial stats with additional calculations
+  const enhancedFinancialStats = {
+    ...financialStats,
+    // Ensure all required fields are present
+    totalRevenue: financialStats.totalRevenue || 0,
+    netProfit: financialStats.netProfit || 0,
+    totalSales: financialStats.totalSales || filteredTransactions.length,
+    creditSales: financialStats.creditSales || filteredTransactions.filter(t => t.isCreditTransaction).reduce((sum, t) => sum + (t.totalAmount || 0), 0),
+    nonCreditSales: financialStats.nonCreditSales || filteredTransactions.filter(t => !t.isCreditTransaction).reduce((sum, t) => sum + (t.totalAmount || 0), 0),
+    outstandingCredit: financialStats.outstandingCredit || filteredTransactions.filter(t => t.isCreditTransaction).reduce((sum, t) => sum + (t.outstandingRevenue || 0), 0),
+    totalExpenses: financialStats.totalExpenses || expenses.reduce((sum, e) => sum + CalculationUtils.safeNumber(e.amount), 0),
+    
+    // Use the enhanced COGS calculation
+    costOfGoodsSold: parseFloat(costOfGoodsSold.toFixed(2)),
+    
+    // Recalculate gross profit and profit margin with accurate COGS
+    grossProfit: financialStats.grossProfit || parseFloat((enhancedFinancialStats.totalRevenue - costOfGoodsSold).toFixed(2)),
+    profitMargin: financialStats.profitMargin || CalculationUtils.calculateProfitMargin(enhancedFinancialStats.totalRevenue, enhancedFinancialStats.grossProfit)
+  };
+
+  // Recalculate net profit with accurate expenses and COGS
+  if (!financialStats.netProfit) {
+    enhancedFinancialStats.netProfit = parseFloat((enhancedFinancialStats.grossProfit - enhancedFinancialStats.totalExpenses).toFixed(2));
+  }
+
+  // Business stats
+  const businessStats = {
+    totalProducts: products.length,
+    totalShops: shops.length,
+    totalCashiers: cashiers.length,
+    lowStockCount: lowStockProducts.length,
+    activeCredits: credits.filter(c => c.status !== 'paid' && CalculationUtils.safeNumber(c.balanceDue) > 0).length
+  };
+
+  return {
+    financialStats: enhancedFinancialStats,
+    businessStats,
+    recentTransactions,
+    lowStockProducts,
+    topProducts,
+    shopPerformance,
+    cashierPerformance,
+    creditAlerts,
+    timestamp: new Date().toISOString(),
+    appliedFilters: activeFilters,
+    dataSources: {
+      transactions: filteredTransactions.length,
+      products: products.length,
+      expenses: expenses.length,
+      credits: credits.length,
+      shops: shops.length,
+      cashiers: cashiers.length
+    }
+  };
+};
 
   // Handle filter changes
   const handleFilterChange = (key, value) => {
@@ -607,24 +391,21 @@ const AdminDashboard = () => {
   const quickRefresh = async () => {
     setRefreshing(true);
     try {
-      const quickData = await transactionAPI.getOptimizedReports({ 
-        quick: true,
-        limit: 50 
-      });
-      
-      if (quickData?.comprehensiveData) {
-        const processedData = CalculationUtils.processDashboardData(
-          quickData.comprehensiveData,
-          quickData.credits || [],
-          shops,
-          filters
-        );
-        setDashboardData(processedData);
-        setDataTimestamp(new Date().toISOString());
-        message.success('Quick refresh completed');
+      const params = {};
+      if (filters.shop && filters.shop !== 'all') {
+        params.shopId = filters.shop;
       }
+
+      const comprehensiveData = await unifiedAPI.getCombinedTransactions(params);
+      const shopsData = await shopAPI.getAll();
+      const processedData = processDashboardData(comprehensiveData, shopsData, filters);
+      
+      setDashboardData(processedData);
+      setDataTimestamp(new Date().toISOString());
+      message.success('Quick refresh completed');
     } catch (error) {
       console.error('Quick refresh failed:', error);
+      message.error('Quick refresh failed');
     } finally {
       setRefreshing(false);
     }
@@ -792,7 +573,7 @@ const AdminDashboard = () => {
     }
   ];
 
-  // Enhanced Sales Columns with payment method indicators
+  // ENHANCED: Sales Columns aligned with Transaction Report
   const salesColumns = [
     {
       title: 'Transaction ID',
@@ -831,31 +612,24 @@ const AdminDashboard = () => {
             {CalculationUtils.formatCurrency(amount)}
           </Text>
           <Tag 
-            color={
-              record.paymentMethod === 'credit' ? 'orange' : 
-              record.paymentMethod === 'bank_mpesa' ? 'blue' :
-              record.paymentMethod === 'cash_bank_mpesa' ? 'purple' : 'green'
-            }
+            color={record.isCreditTransaction ? 'orange' : 'green'}
             style={{ fontSize: '9px', margin: 0 }}
           >
-            {record.paymentMethod === 'cash_bank_mpesa' ? 'CASH/BANK' : 
-             record.paymentMethod === 'bank_mpesa' ? 'BANK/MPESA' : 
-             record.paymentMethod?.toUpperCase() || 'CASH'}
+            {record.isCreditTransaction ? 'CREDIT' : 'COMPLETE'}
           </Tag>
         </Space>
       ),
       width: 100
     },
     {
-      title: 'COGS',
-      dataIndex: 'cost',
-      key: 'cost',
-      render: (cost) => (
-        <Text style={{ fontSize: '11px', color: '#faad14' }}>
-          {CalculationUtils.formatCurrency(cost)}
+      title: 'Revenue',
+      key: 'recognizedRevenue',
+      render: (_, record) => (
+        <Text strong style={{ fontSize: '12px', color: '#52c41a' }}>
+          {CalculationUtils.formatCurrency(record.recognizedRevenue || record.totalAmount)}
         </Text>
       ),
-      width: 80
+      width: 100
     },
     {
       title: 'Profit',
@@ -879,6 +653,33 @@ const AdminDashboard = () => {
       dataIndex: 'shop',
       key: 'shop',
       render: (text) => <Tag color="blue" style={{ fontSize: '10px' }}>{text || 'Unknown Shop'}</Tag>,
+      width: 80
+    },
+    {
+      title: 'Status',
+      key: 'status',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Tag 
+            color={record.isCreditTransaction ? 'orange' : 'green'}
+            style={{ fontSize: '9px' }}
+          >
+            {record.isCreditTransaction ? 'CREDIT' : 'COMPLETE'}
+          </Tag>
+          {record.isCreditTransaction && record.creditStatus && (
+            <Tag 
+              color={
+                record.creditStatus === 'paid' ? 'green' :
+                record.creditStatus === 'partially_paid' ? 'blue' :
+                record.creditStatus === 'overdue' ? 'red' : 'orange'
+              }
+              style={{ fontSize: '8px' }}
+            >
+              {record.creditStatus.toUpperCase()}
+            </Tag>
+          )}
+        </Space>
+      ),
       width: 80
     }
   ];
@@ -921,9 +722,9 @@ const AdminDashboard = () => {
       width: 50
     },
     {
-      title: 'COGS',
-      dataIndex: 'buyingPrice',
-      key: 'buyingPrice',
+      title: 'Price',
+      dataIndex: 'sellingPrice',
+      key: 'sellingPrice',
       render: (price) => (
         <Text style={{ fontSize: '11px' }}>
           {CalculationUtils.formatCurrency(price)}
@@ -934,16 +735,20 @@ const AdminDashboard = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
       <Sider 
         collapsible 
         collapsed={collapsed} 
         onCollapse={setCollapsed}
         breakpoint="lg"
         collapsedWidth="80"
+        style={{ 
+          background: 'linear-gradient(180deg, #2c3e50 0%, #3498db 100%)',
+          boxShadow: '2px 0 8px rgba(0,0,0,0.15)'
+        }}
       >
-        <div className="logo">
-          <Title level={4} style={{ color: 'white', textAlign: 'center', padding: '16px 0' }}>
+        <div className="logo" style={{ padding: '16px 0', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <Title level={4} style={{ color: 'white', margin: 0, fontWeight: 'bold' }}>
             {collapsed ? 'TP' : 'The Place Club'}
           </Title>
         </div>
@@ -952,38 +757,43 @@ const AdminDashboard = () => {
           selectedKeys={[getActiveTab()]}
           mode="inline"
           onClick={handleMenuClick}
+          style={{ background: 'transparent', border: 'none' }}
         >
-          <Menu.Item key="dashboard" icon={<DashboardOutlined />}>
+          <Menu.Item key="dashboard" icon={<DashboardOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Dashboard
           </Menu.Item>
-          <Menu.Item key="products" icon={<ProductOutlined />}>
+          <Menu.Item key="products" icon={<ProductOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Product Management
           </Menu.Item>
-          <Menu.Item key="shops" icon={<ShopOutlined />}>
+          <Menu.Item key="shops" icon={<ShopOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Shop Management
           </Menu.Item>
-          <Menu.Item key="cashiers" icon={<UserOutlined />}>
+          <Menu.Item key="cashiers" icon={<UserOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Cashier Management
           </Menu.Item>
-          <Menu.Item key="transactions" icon={<BarChartOutlined />}>
+          <Menu.Item key="transactions" icon={<BarChartOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Transactions Report
           </Menu.Item>
-          <Menu.Item key="expenses" icon={<DollarOutlined />}>
+          <Menu.Item key="expenses" icon={<DollarOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Expense Management
           </Menu.Item>
-          <Menu.Item key="inventory" icon={<AppstoreOutlined />}>
+          <Menu.Item key="inventory" icon={<AppstoreOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Inventory
           </Menu.Item>
-          <Menu.Item key="credits" icon={<CreditCardOutlined />}>
+          <Menu.Item key="credits" icon={<CreditCardOutlined />} style={{ margin: '4px 8px', borderRadius: '6px' }}>
             Credit Management
           </Menu.Item>
         </Menu>
       </Sider>
 
       <Layout className="site-layout">
-        <Header className="site-layout-header">
+        <Header className="site-layout-header" style={{ 
+          background: 'linear-gradient(90deg, #3498db 0%, #2980b9 100%)',
+          padding: '0 24px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <Title level={4} style={{ color: 'white', margin: 0 }}>
+            <Title level={4} style={{ color: 'white', margin: 0, fontWeight: 'bold' }}>
               STANZO SHOP - ADMIN DASHBOARD
             </Title>
             <Space>
@@ -994,6 +804,7 @@ const AdminDashboard = () => {
                   icon={<ReloadOutlined spin={filters.autoRefresh} />}
                   onClick={() => handleFilterChange('autoRefresh', !filters.autoRefresh)}
                   size="small"
+                  style={{ background: filters.autoRefresh ? '#52c41a' : '#f0f0f0' }}
                 >
                   Auto
                 </Button>
@@ -1004,6 +815,7 @@ const AdminDashboard = () => {
                 onClick={quickRefresh}
                 disabled={refreshing}
                 size="small"
+                type="primary"
               >
                 Quick Refresh
               </Button>
@@ -1013,6 +825,7 @@ const AdminDashboard = () => {
                 icon={<FilterOutlined />}
                 onClick={() => setFilterVisible(!filterVisible)}
                 size="small"
+                type="default"
               >
                 Filters
               </Button>
@@ -1022,6 +835,7 @@ const AdminDashboard = () => {
                 onClick={handleExportData}
                 loading={exportLoading}
                 size="small"
+                type="default"
               >
                 Export
               </Button>
@@ -1031,7 +845,7 @@ const AdminDashboard = () => {
                 placement="bottomRight"
                 arrow
               >
-                <Button type="text" style={{ color: 'white' }} size="small">
+                <Button type="text" style={{ color: 'white', fontWeight: 'bold' }} size="small">
                   <Space>
                     <UserOutlined />
                     Admin
@@ -1052,7 +866,7 @@ const AdminDashboard = () => {
           </div>
         </Header>
         
-        <Content style={{ margin: '16px', padding: 16 }}>
+        <Content style={{ margin: '16px', padding: 16, background: '#f5f7fa' }}>
           {showWelcome && location.pathname === '/admin/dashboard' && (
             <div style={{
               display: 'flex',
@@ -1061,8 +875,9 @@ const AdminDashboard = () => {
               height: '60vh',
               fontSize: '2.5rem',
               fontWeight: 'bold',
-              color: '#1890ff',
-              animation: 'fadeIn 1s'
+              color: '#3498db',
+              animation: 'fadeIn 1s',
+              textShadow: '2px 2px 4px rgba(0,0,0,0.1)'
             }}>
               WELCOME TO THE STANZO SHOP ADMIN DASHBOARD
             </div>
@@ -1074,11 +889,11 @@ const AdminDashboard = () => {
               {filterVisible && (
                 <Card 
                   size="small" 
-                  style={{ marginBottom: 16 }}
+                  style={{ marginBottom: 16, border: '1px solid #e8e8e8', borderRadius: '8px' }}
                   title={
                     <Space>
-                      <FilterOutlined />
-                      Dashboard Filters
+                      <FilterOutlined style={{ color: '#3498db' }} />
+                      <Text strong>Dashboard Filters</Text>
                     </Space>
                   }
                   extra={
@@ -1164,7 +979,7 @@ const AdminDashboard = () => {
                           </Text>
                           {filters.dateRange && (
                             <Tag color="blue">
-                              {filters.dateRange[0].toLocaleDateString()} - {filters.dateRange[1].toLocaleDateString()}
+                              {filters.dateRange[0].format('YYYY-MM-DD')} - {filters.dateRange[1].format('YYYY-MM-DD')}
                             </Tag>
                           )}
                           {filters.shop !== 'all' && (
@@ -1177,173 +992,374 @@ const AdminDashboard = () => {
                     </Col>
                   </Row>
 
-                  {/* Enhanced Financial Overview with Credit Sales */}
-                  <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+                  {/* UPDATED: Enhanced Financial Overview with Expense and COGS */}
+                  <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
                     <Col span={24}>
-                      <Title level={4}>
-                        <LineChartOutlined /> Financial Overview
-                        {filters.dateRange && (
-                          <Text type="secondary" style={{ fontSize: '14px', marginLeft: 8 }}>
-                            ({filters.dateRange[0].toLocaleDateString()} - {filters.dateRange[1].toLocaleDateString()})
-                          </Text>
-                        )}
-                      </Title>
-                    </Col>
-                    
-                    {/* Main Financial Metrics */}
-                    <Col xs={24} sm={12} md={6} lg={4}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Total Revenue" 
-                          value={dashboardData.financialStats.totalRevenue} 
-                          prefix="KES" 
-                          precision={0}
-                          valueStyle={{ color: '#1890ff', fontSize: '14px' }}
-                          prefix={<MoneyCollectOutlined />}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={4}>
-                      <Card size="small">
-                        <Statistic 
-                          title="COGS" 
-                          value={dashboardData.financialStats.totalCOGS} 
-                          prefix="KES" 
-                          precision={0}
-                          valueStyle={{ color: '#faad14', fontSize: '14px' }}
-                          prefix={<CalculatorOutlined />}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={4}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Gross Profit" 
-                          value={dashboardData.financialStats.totalProfit} 
-                          prefix="KES" 
-                          precision={0}
-                          valueStyle={{ 
-                            color: CalculationUtils.getProfitColor(dashboardData.financialStats.totalProfit),
-                            fontSize: '14px'
-                          }}
-                          prefix={CalculationUtils.getProfitIcon(dashboardData.financialStats.totalProfit)}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={4}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Expenses" 
-                          value={dashboardData.financialStats.totalExpenses} 
-                          prefix="KES" 
-                          precision={0}
-                          valueStyle={{ color: '#cf1322', fontSize: '14px' }}
-                          prefix={<DollarOutlined />}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={4}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Net Profit" 
-                          value={dashboardData.financialStats.netProfit} 
-                          prefix="KES" 
-                          precision={0}
-                          valueStyle={{ 
-                            color: CalculationUtils.getProfitColor(dashboardData.financialStats.netProfit),
-                            fontSize: '14px'
-                          }}
-                          prefix={CalculationUtils.getProfitIcon(dashboardData.financialStats.netProfit)}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={4}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Profit Margin" 
-                          value={dashboardData.financialStats.profitMargin} 
-                          suffix="%" 
-                          precision={1}
-                          valueStyle={{ 
-                            color: dashboardData.financialStats.profitMargin >= 0 ? '#3f8600' : '#cf1322',
-                            fontSize: '14px'
-                          }}
-                        />
+                      <Card 
+                        title={
+                          <Space>
+                            <LineChartOutlined style={{ color: '#3498db', fontSize: '18px' }} />
+                            <Text strong style={{ fontSize: '16px', color: '#2c3e50' }}>Financial Overview</Text>
+                            {filters.dateRange && (
+                              <Text type="secondary" style={{ fontSize: '12px', marginLeft: 8 }}>
+                                ({filters.dateRange[0].format('YYYY-MM-DD')} - {filters.dateRange[1].format('YYYY-MM-DD')})
+                              </Text>
+                            )}
+                          </Space>
+                        }
+                        style={{ 
+                          borderRadius: '12px',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          border: 'none'
+                        }}
+                        bodyStyle={{ padding: '16px' }}
+                      >
+                        <Row gutter={[16, 16]}>
+                          {/* Core Revenue Metrics */}
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: 'white', fontSize: '12px' }}>
+                                    <MoneyCollectOutlined /> Total Revenue
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.totalRevenue} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: 'white', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+                          
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: 'white', fontSize: '12px' }}>
+                                    <ShoppingCartOutlined /> Total Sales
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.totalSales} 
+                                precision={0}
+                                valueStyle={{ color: 'white', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+
+                          {/* NEW: Expense Metrics */}
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: 'white', fontSize: '12px' }}>
+                                    <DollarOutlined /> Total Expenses
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.totalExpenses} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: 'white', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: 'white', fontSize: '12px' }}>
+                                    <CalculatorOutlined /> Net Profit
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.netProfit} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: 'white', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+
+                          {/* NEW: Cost of Goods Sold */}
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: 'white', fontSize: '12px' }}>
+                                    <ProductOutlined /> COGS
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.costOfGoodsSold} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: 'white', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+
+                          {/* Credit Sales */}
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: '#2c3e50', fontSize: '12px' }}>
+                                    <CreditCardFilled /> Credit Sales
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.creditSales} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: '#2c3e50', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+
+                          {/* Payment Methods */}
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: '#2c3e50', fontSize: '12px' }}>
+                                    <BankOutlined /> Digital Payments
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.totalMpesaBank} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: '#2c3e50', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+
+                          <Col xs={24} sm={12} md={8} lg={6}>
+                            <Card 
+                              size="small" 
+                              style={{ 
+                                background: 'linear-gradient(135deg, #d299c2 0%, #fef9d7 100%)',
+                                border: 'none',
+                                borderRadius: '8px'
+                              }}
+                              bodyStyle={{ padding: '12px', textAlign: 'center' }}
+                            >
+                              <Statistic 
+                                title={
+                                  <Text style={{ color: '#2c3e50', fontSize: '12px' }}>
+                                    <WalletOutlined /> Cash Payments
+                                  </Text>
+                                }
+                                value={dashboardData.financialStats.totalCash} 
+                                prefix="KES" 
+                                precision={0}
+                                valueStyle={{ color: '#2c3e50', fontSize: '16px', fontWeight: 'bold' }}
+                              />
+                            </Card>
+                          </Col>
+                        </Row>
                       </Card>
                     </Col>
                   </Row>
 
-                  {/* REMOVED: Revenue Breakdown by Payment Method section */}
+                  {/* Credit Management Overview - Only show if there are credit sales */}
+                  {dashboardData.financialStats.creditSales > 0 && (
+                    <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                      <Col span={24}>
+                        <Card 
+                          title={
+                            <Space>
+                              <CreditCardOutlined style={{ color: '#e74c3c' }} />
+                              <Text strong>Credit Management</Text>
+                            </Space>
+                          }
+                          style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                        >
+                          <Row gutter={[16, 16]}>
+                            <Col xs={24} sm={12} md={8} lg={6}>
+                              <Card size="small">
+                                <Statistic 
+                                  title="Outstanding Credit" 
+                                  value={dashboardData.financialStats.outstandingCredit} 
+                                  prefix="KES" 
+                                  precision={0}
+                                  valueStyle={{ color: '#cf1322', fontSize: '14px' }}
+                                  prefix={<WarningOutlined />}
+                                />
+                              </Card>
+                            </Col>
+                            <Col xs={24} sm={12} md={8} lg={6}>
+                              <Card size="small">
+                                <Statistic 
+                                  title="Credit Sales Count" 
+                                  value={dashboardData.financialStats.creditSalesCount} 
+                                  precision={0}
+                                  valueStyle={{ color: '#fa8c16', fontSize: '14px' }}
+                                />
+                              </Card>
+                            </Col>
+                            <Col xs={24} sm={12} md={8} lg={6}>
+                              <Card size="small">
+                                <Statistic 
+                                  title="Complete Sales" 
+                                  value={dashboardData.financialStats.completeTransactionsCount} 
+                                  precision={0}
+                                  valueStyle={{ color: '#52c41a', fontSize: '14px' }}
+                                />
+                              </Card>
+                            </Col>
+                            <Col xs={24} sm={12} md={8} lg={6}>
+                              <Card size="small">
+                                <Statistic 
+                                  title="Total Credit Given" 
+                                  value={dashboardData.financialStats.totalCreditGiven} 
+                                  prefix="KES" 
+                                  precision={0}
+                                  valueStyle={{ color: '#722ed1', fontSize: '14px' }}
+                                />
+                              </Card>
+                            </Col>
+                          </Row>
+                        </Card>
+                      </Col>
+                    </Row>
+                  )}
 
-                  {/* Business Overview and Additional Metrics */}
-                  <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-                    <Col xs={24} sm={12} md={6} lg={3}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Total Sales" 
-                          value={dashboardData.financialStats.totalSales} 
-                          valueStyle={{ color: '#722ed1', fontSize: '14px' }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={3}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Items Sold" 
-                          value={dashboardData.financialStats.totalItemsSold} 
-                          valueStyle={{ color: '#52c41a', fontSize: '14px' }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={3}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Products" 
-                          value={dashboardData.businessStats.totalProducts} 
-                          valueStyle={{ color: '#1890ff', fontSize: '14px' }}
-                          prefix={<ProductOutlined />}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={3}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Shops" 
-                          value={dashboardData.businessStats.totalShops} 
-                          valueStyle={{ color: '#52c41a', fontSize: '14px' }}
-                          prefix={<ShopOutlined />}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={3}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Low Stock" 
-                          value={dashboardData.businessStats.lowStockCount} 
-                          valueStyle={{ 
-                            color: dashboardData.businessStats.lowStockCount > 0 ? '#cf1322' : '#3f8600',
-                            fontSize: '14px'
-                          }}
-                          prefix={<WarningOutlined />}
-                        />
-                      </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={6} lg={3}>
-                      <Card size="small">
-                        <Statistic 
-                          title="Outstanding Credit" 
-                          value={dashboardData.financialStats.totalBalanceDue} 
-                          prefix="KES" 
-                          precision={0}
-                          valueStyle={{ color: '#faad14', fontSize: '14px' }}
-                          prefix={<CreditCardOutlined />}
-                        />
+                  {/* Business Overview */}
+                  <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                    <Col span={24}>
+                      <Card 
+                        title={
+                          <Space>
+                            <AppstoreOutlined style={{ color: '#9b59b6' }} />
+                            <Text strong>Business Overview</Text>
+                          </Space>
+                        }
+                        style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                      >
+                        <Row gutter={[16, 16]}>
+                          <Col xs={24} sm={12} md={6} lg={3}>
+                            <Card size="small" style={{ background: '#ecf0f1', border: 'none' }}>
+                              <Statistic 
+                                title="Total Products" 
+                                value={dashboardData.businessStats.totalProducts} 
+                                valueStyle={{ color: '#3498db', fontSize: '14px' }}
+                                prefix={<ProductOutlined />}
+                              />
+                            </Card>
+                          </Col>
+                          <Col xs={24} sm={12} md={6} lg={3}>
+                            <Card size="small" style={{ background: '#ecf0f1', border: 'none' }}>
+                              <Statistic 
+                                title="Total Shops" 
+                                value={dashboardData.businessStats.totalShops} 
+                                valueStyle={{ color: '#2ecc71', fontSize: '14px' }}
+                                prefix={<ShopOutlined />}
+                              />
+                            </Card>
+                          </Col>
+                          <Col xs={24} sm={12} md={6} lg={3}>
+                            <Card size="small" style={{ background: '#ecf0f1', border: 'none' }}>
+                              <Statistic 
+                                title="Total Cashiers" 
+                                value={dashboardData.businessStats.totalCashiers} 
+                                valueStyle={{ color: '#9b59b6', fontSize: '14px' }}
+                                prefix={<UserOutlined />}
+                              />
+                            </Card>
+                          </Col>
+                          <Col xs={24} sm={12} md={6} lg={3}>
+                            <Card size="small" style={{ background: '#ecf0f1', border: 'none' }}>
+                              <Statistic 
+                                title="Low Stock" 
+                                value={dashboardData.businessStats.lowStockCount} 
+                                valueStyle={{ 
+                                  color: dashboardData.businessStats.lowStockCount > 0 ? '#e74c3c' : '#27ae60',
+                                  fontSize: '14px'
+                                }}
+                                prefix={<WarningOutlined />}
+                              />
+                            </Card>
+                          </Col>
+                          <Col xs={24} sm={12} md={6} lg={3}>
+                            <Card size="small" style={{ background: '#ecf0f1', border: 'none' }}>
+                              <Statistic 
+                                title="Active Credits" 
+                                value={dashboardData.businessStats.activeCredits} 
+                                valueStyle={{ color: '#f39c12', fontSize: '14px' }}
+                                prefix={<CreditCardOutlined />}
+                              />
+                            </Card>
+                          </Col>
+                          <Col xs={24} sm={12} md={6} lg={3}>
+                            <Card size="small" style={{ background: '#ecf0f1', border: 'none' }}>
+                              <Statistic 
+                                title="Items Sold" 
+                                value={dashboardData.financialStats.totalItemsSold} 
+                                valueStyle={{ color: '#1abc9c', fontSize: '14px' }}
+                              />
+                            </Card>
+                          </Col>
+                        </Row>
                       </Card>
                     </Col>
                   </Row>
 
                   {/* Alerts Section */}
-                  <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+                  <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
                     <Col span={24}>
                       {dashboardData.businessStats.lowStockCount > 0 && (
                         <Alert
@@ -1357,12 +1373,27 @@ const AdminDashboard = () => {
                               View Inventory
                             </Button>
                           }
-                          style={{ marginBottom: 8 }}
+                          style={{ marginBottom: 8, borderRadius: '8px' }}
                         />
                       )}
-                      {dashboardData.financialStats.overdueCredits > 0 && (
+                      {dashboardData.financialStats.outstandingCredit > 0 && (
                         <Alert
-                          message={`${dashboardData.financialStats.overdueCredits} credits are overdue`}
+                          message={`Outstanding credit: ${CalculationUtils.formatCurrency(dashboardData.financialStats.outstandingCredit)}`}
+                          description="Monitor credit collection and follow up with customers."
+                          type="info"
+                          showIcon
+                          icon={<CreditCardOutlined />}
+                          action={
+                            <Button size="small" type="primary" onClick={() => handleViewAll('credits')}>
+                              View Credits
+                            </Button>
+                          }
+                          style={{ marginBottom: 8, borderRadius: '8px' }}
+                        />
+                      )}
+                      {dashboardData.creditAlerts.length > 0 && (
+                        <Alert
+                          message={`${dashboardData.creditAlerts.length} credits are overdue`}
                           description="Follow up with customers for payment collection."
                           type="error"
                           showIcon
@@ -1372,20 +1403,21 @@ const AdminDashboard = () => {
                               View Credits
                             </Button>
                           }
+                          style={{ borderRadius: '8px' }}
                         />
                       )}
                     </Col>
                   </Row>
 
                   {/* Main Content Grid */}
-                  <Row gutter={[12, 12]}>
+                  <Row gutter={[16, 16]}>
                     {/* Recent Transactions */}
                     <Col xs={24} lg={12}>
                       <Card 
                         title={
                           <Space>
-                            <ShoppingCartOutlined />
-                            Recent Transactions
+                            <ShoppingCartOutlined style={{ color: '#3498db' }} />
+                            <Text strong>Recent Transactions</Text>
                             <Badge count={dashboardData.recentTransactions.length} showZero />
                           </Space>
                         }
@@ -1408,7 +1440,7 @@ const AdminDashboard = () => {
                             </Button>
                           </Space>
                         }
-                        size="small"
+                        style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                       >
                         <Table 
                           dataSource={filteredRecentTransactions} 
@@ -1431,12 +1463,12 @@ const AdminDashboard = () => {
                       <Card 
                         title={
                           <Space>
-                            <WarningOutlined />
-                            Low Stock Products
+                            <WarningOutlined style={{ color: '#e74c3c' }} />
+                            <Text strong>Low Stock Products</Text>
                             <Badge 
                               count={dashboardData.lowStockProducts.length} 
                               showZero 
-                              style={{ backgroundColor: '#cf1322' }} 
+                              style={{ backgroundColor: '#e74c3c' }} 
                             />
                           </Space>
                         }
@@ -1448,7 +1480,7 @@ const AdminDashboard = () => {
                             Manage
                           </Button>
                         }
-                        size="small"
+                        style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                       >
                         <Table 
                           dataSource={dashboardData.lowStockProducts} 
@@ -1466,44 +1498,42 @@ const AdminDashboard = () => {
                       <Card 
                         title={
                           <Space>
-                            <ProductOutlined />
-                            Top Selling Products
+                            <ProductOutlined style={{ color: '#2ecc71' }} />
+                            <Text strong>Top Selling Products</Text>
                           </Space>
                         }
-                        size="small"
+                        style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                       >
                         <List
                           dataSource={dashboardData.topProducts}
                           renderItem={(item, index) => (
-                            <List.Item>
+                            <List.Item style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
                               <List.Item.Meta
                                 avatar={
                                   <Avatar 
                                     size="small" 
                                     style={{ 
-                                      backgroundColor: index < 3 ? '#1890ff' : '#d9d9d9',
-                                      fontSize: '10px'
+                                      backgroundColor: index < 3 ? '#3498db' : '#95a5a6',
+                                      fontSize: '10px',
+                                      fontWeight: 'bold'
                                     }}
                                   >
                                     {index + 1}
                                   </Avatar>
                                 }
                                 title={
-                                  <Text style={{ fontSize: '12px' }}>{item.name}</Text>
+                                  <Text style={{ fontSize: '13px', fontWeight: 'bold' }}>{item.name}</Text>
                                 }
                                 description={
                                   <Space direction="vertical" size={0}>
                                     <Text type="secondary" style={{ fontSize: '11px' }}>
-                                      Sold: {item.quantity} units
+                                      Sold: {item.totalSold} units
                                     </Text>
                                     <Text type="secondary" style={{ fontSize: '11px' }}>
-                                      COGS: {CalculationUtils.formatCurrency(item.cost)}
+                                      Revenue: {CalculationUtils.formatCurrency(item.totalRevenue)}
                                     </Text>
-                                    <Text strong style={{ fontSize: '11px', color: '#1890ff' }}>
-                                      Revenue: {CalculationUtils.formatCurrency(item.revenue)}
-                                    </Text>
-                                    <Text strong style={{ fontSize: '11px', color: CalculationUtils.getProfitColor(item.profit) }}>
-                                      Profit: {CalculationUtils.formatCurrency(item.profit)}
+                                    <Text strong style={{ fontSize: '11px', color: CalculationUtils.getProfitColor(item.totalProfit) }}>
+                                      Profit: {CalculationUtils.formatCurrency(item.totalProfit)}
                                     </Text>
                                   </Space>
                                 }
@@ -1520,30 +1550,31 @@ const AdminDashboard = () => {
                       <Card 
                         title={
                           <Space>
-                            <ShopOutlined />
-                            Shop Performance
+                            <ShopOutlined style={{ color: '#9b59b6' }} />
+                            <Text strong>Shop Performance</Text>
                           </Space>
                         }
-                        size="small"
+                        style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                       >
                         <List
                           dataSource={dashboardData.shopPerformance}
                           renderItem={(item, index) => (
-                            <List.Item>
+                            <List.Item style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
                               <List.Item.Meta
                                 avatar={
                                   <Avatar 
                                     size="small" 
                                     style={{ 
-                                      backgroundColor: index < 3 ? '#52c41a' : '#d9d9d9',
-                                      fontSize: '10px'
+                                      backgroundColor: index < 3 ? '#9b59b6' : '#bdc3c7',
+                                      fontSize: '10px',
+                                      fontWeight: 'bold'
                                     }}
                                   >
                                     {item.name?.charAt(0)?.toUpperCase() || 'S'}
                                   </Avatar>
                                 }
                                 title={
-                                  <Text style={{ fontSize: '12px' }}>{item.name}</Text>
+                                  <Text style={{ fontSize: '13px', fontWeight: 'bold' }}>{item.name}</Text>
                                 }
                                 description={
                                   <Space direction="vertical" size={0}>
@@ -1551,13 +1582,10 @@ const AdminDashboard = () => {
                                       Transactions: {item.transactions}
                                     </Text>
                                     <Text type="secondary" style={{ fontSize: '11px' }}>
-                                      COGS: {CalculationUtils.formatCurrency(item.cost)}
-                                    </Text>
-                                    <Text strong style={{ fontSize: '11px', color: '#1890ff' }}>
                                       Revenue: {CalculationUtils.formatCurrency(item.revenue)}
                                     </Text>
                                     <Text strong style={{ fontSize: '11px', color: CalculationUtils.getProfitColor(item.profit) }}>
-                                      Profit: {CalculationUtils.formatCurrency(item.profit)} ({item.profitMargin?.toFixed(1)}%)
+                                      Profit: {CalculationUtils.formatCurrency(item.profit)}
                                     </Text>
                                   </Space>
                                 }
@@ -1571,38 +1599,53 @@ const AdminDashboard = () => {
                   </Row>
 
                   {/* Quick Actions */}
-                  <Row gutter={[12, 12]} style={{ marginTop: 16 }}>
+                  <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
                     <Col span={24}>
-                      <Card title="Quick Actions" size="small">
+                      <Card 
+                        title="Quick Actions" 
+                        style={{ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                      >
                         <Space wrap>
                           <Button 
                             type="primary" 
                             icon={<BarChartOutlined />}
                             onClick={() => handleViewAll('sales')}
+                            size="middle"
                           >
                             View Full Reports
                           </Button>
                           <Button 
                             icon={<ProductOutlined />}
                             onClick={() => handleViewAll('products')}
+                            size="middle"
                           >
                             Manage Products
                           </Button>
                           <Button 
                             icon={<CreditCardOutlined />}
                             onClick={() => handleViewAll('credits')}
+                            size="middle"
                           >
                             Manage Credits
                           </Button>
                           <Button 
                             icon={<AppstoreOutlined />}
                             onClick={() => handleViewAll('inventory')}
+                            size="middle"
                           >
                             Check Inventory
                           </Button>
                           <Button 
+                            icon={<DollarOutlined />}
+                            onClick={() => handleViewAll('expenses')}
+                            size="middle"
+                          >
+                            Manage Expenses
+                          </Button>
+                          <Button 
                             icon={<ReloadOutlined />}
                             onClick={handleRefreshData}
+                            size="middle"
                           >
                             Full Refresh
                           </Button>

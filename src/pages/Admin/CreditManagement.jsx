@@ -1,5 +1,4 @@
-// src/components/CreditManagement.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -15,37 +14,34 @@ import {
   Typography,
   Alert,
   notification,
-  Statistic,
   Row,
   Col,
   Popconfirm,
   Tooltip,
   Badge,
-  message,
   Divider,
   Descriptions
 } from 'antd';
 import {
   DollarOutlined,
-  CalendarOutlined,
   ExclamationCircleOutlined,
   BellOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  CloseCircleOutlined,
   DeleteOutlined,
   EyeOutlined,
   UserOutlined,
   ShopOutlined,
   EditOutlined,
   SyncOutlined,
-  SearchOutlined,
   FilterOutlined,
   CreditCardOutlined,
-  EnvironmentOutlined
+  EnvironmentOutlined,
+  FileTextOutlined
 } from '@ant-design/icons';
-import { creditAPI, shopAPI } from '../../services/api';
+import { creditAPI, shopAPI, transactionAPI } from '../../services/api';
 import { shopUtils } from '../../utils/shopUtils';
+import CalculationUtils from '../../utils/calculationUtils'; // ADD MISSING IMPORT
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -89,57 +85,6 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
     initializeShops();
   }, [initialShops]);
 
-  // Fetch credits data with enhanced shop information
-  const fetchCredits = async () => {
-    setLoading(true);
-    try {
-      const params = {};
-      if (selectedShop && selectedShop !== 'all') {
-        params.shopId = selectedShop;
-      }
-      
-      const response = await creditAPI.getAll(params);
-      // Ensure credits is always an array and calculate proper balance due
-      const creditsData = Array.isArray(response?.data) ? response.data : [];
-      
-      // Calculate proper balance due for each credit
-      const creditsWithCalculatedBalance = creditsData.map(credit => {
-        const totalAmount = Number(credit.totalAmount) || 0;
-        const amountPaid = Number(credit.amountPaid) || 0;
-        const balanceDue = totalAmount - amountPaid;
-        
-        // Enhance credit with shop information
-        const shopInfo = shopUtils.getShopDetails(credit.shopId, shops);
-        
-        return {
-          ...credit,
-          totalAmount,
-          amountPaid,
-          balanceDue: Math.max(0, balanceDue),
-          shopName: shopInfo?.name || 'Unknown Shop',
-          shopType: shopInfo?.type || 'Unknown',
-          // Update status based on calculated balance
-          status: calculateCreditStatus(credit, balanceDue)
-        };
-      });
-      
-      setCredits(creditsWithCalculatedBalance);
-      
-      // Check for credits due in 2 days
-      checkDueSoonCredits(creditsWithCalculatedBalance);
-    } catch (error) {
-      console.error('Error fetching credits:', error);
-      notification.error({
-        message: 'Failed to load credits',
-        description: error.message
-      });
-      // Set empty array on error
-      setCredits([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Calculate credit status based on balance and due date
   const calculateCreditStatus = (credit, balanceDue) => {
     if (balanceDue <= 0) {
@@ -157,22 +102,6 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
     return 'pending';
   };
 
-  // Fetch payment history for a credit
-  const fetchPaymentHistory = async (creditId) => {
-    try {
-      const response = await creditAPI.getPaymentHistory(creditId);
-      const history = Array.isArray(response?.data) ? response.data : [];
-      setPaymentHistory(history);
-    } catch (error) {
-      console.error('Error fetching payment history:', error);
-      notification.error({
-        message: 'Failed to load payment history',
-        description: error.message
-      });
-      setPaymentHistory([]);
-    }
-  };
-
   // Check for credits due in 2 days and send notifications
   const checkDueSoonCredits = (creditsData) => {
     if (!Array.isArray(creditsData)) {
@@ -180,7 +109,6 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
       return;
     }
 
-    const twoDaysFromNow = dayjs().add(2, 'day');
     const dueSoon = creditsData.filter(credit => {
       if (!credit || credit.status === 'paid') return false;
       
@@ -199,19 +127,128 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
       notification.warning({
         message: 'Credit Payment Reminder',
         description: `${dueSoon.length} credit(s) are due in 2 days or less.`,
-        duration: 0, // Stays until manually closed
+        duration: 0,
         btn: (
           <Button 
             type="primary" 
             size="small" 
-            onClick={() => {
-              notification.destroy();
-            }}
+            onClick={() => notification.destroy()}
           >
             View Details
           </Button>
         ),
       });
+    }
+  };
+
+  // FIXED: Enhanced credit fetching with duplicate prevention and useCallback
+  const fetchCredits = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {
+        includeTransactions: 'true',
+        status: statusFilter !== 'all' ? statusFilter : undefined
+      };
+      
+      if (selectedShop && selectedShop !== 'all') {
+        params.shopId = selectedShop;
+      }
+      
+      const response = await creditAPI.getAll(params);
+      
+      // Ensure credits is always an array and calculate proper balance due
+      const creditsData = Array.isArray(response?.data) ? response.data : [];
+      
+      // FIXED: Remove duplicate credits based on transaction ID
+      const uniqueCreditsMap = new Map();
+      creditsData.forEach(credit => {
+        let transactionId = credit.transactionId;
+        
+        // Handle case where transactionId might be an object
+        if (transactionId && typeof transactionId === 'object') {
+          transactionId = transactionId._id || transactionId.id || transactionId.transactionId;
+        }
+        
+        // Use transactionId as key to prevent duplicates
+        const key = transactionId || credit._id;
+        if (!uniqueCreditsMap.has(key)) {
+          uniqueCreditsMap.set(key, {
+            ...credit,
+            transactionId: transactionId
+          });
+        }
+      });
+      
+      const uniqueCredits = Array.from(uniqueCreditsMap.values());
+      
+      // Enhanced credits with transaction information
+      const creditsWithDetails = await Promise.all(
+        uniqueCredits.map(async (credit) => {
+          const totalAmount = Number(credit.totalAmount) || 0;
+          const amountPaid = Number(credit.amountPaid) || 0;
+          const balanceDue = totalAmount - amountPaid;
+          
+          // Enhance credit with shop information
+          const shopInfo = shopUtils.getShopDetails(credit.shopId, shops);
+          
+          // FIXED: Proper transaction ID extraction
+          let transactionDetails = null;
+          let transactionId = credit.transactionId;
+          
+          if (transactionId) {
+            try {
+              const transactionResponse = await transactionAPI.getById(transactionId);
+              transactionDetails = transactionResponse?.data || transactionResponse;
+            } catch (error) {
+              console.error('Error fetching transaction details:', error);
+              // Don't fail the entire credits fetch if transaction details fail
+            }
+          }
+          
+          return {
+            ...credit,
+            transactionId: transactionId, // Ensure transactionId is always a string
+            totalAmount,
+            amountPaid,
+            balanceDue: Math.max(0, balanceDue),
+            shopName: shopInfo?.name || 'Unknown Shop',
+            shopType: shopInfo?.type || 'Unknown',
+            transactionDetails,
+            // Update status based on calculated balance
+            status: calculateCreditStatus(credit, balanceDue)
+          };
+        })
+      );
+      
+      setCredits(creditsWithDetails);
+      
+      // Check for credits due in 2 days
+      checkDueSoonCredits(creditsWithDetails);
+    } catch (error) {
+      console.error('Error fetching credits:', error);
+      notification.error({
+        message: 'Failed to load credits',
+        description: error.response?.data?.message || error.message
+      });
+      setCredits([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedShop, statusFilter, shops, currentUser?.role]);
+
+  // Fetch payment history for a credit
+  const fetchPaymentHistory = async (creditId) => {
+    try {
+      const response = await creditAPI.getPaymentHistory(creditId);
+      const history = Array.isArray(response?.data) ? response.data : [];
+      setPaymentHistory(history);
+    } catch (error) {
+      console.error('Error fetching payment history:', error);
+      notification.error({
+        message: 'Failed to load payment history',
+        description: error.response?.data?.message || error.message
+      });
+      setPaymentHistory([]);
     }
   };
 
@@ -237,6 +274,44 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
     return filtered;
   };
 
+  // FIXED: Unified credit stats calculation using CalculationUtils
+  const calculateStats = () => {
+    const filteredCredits = getFilteredCredits();
+    
+    if (!Array.isArray(filteredCredits)) {
+      return CalculationUtils.getDefaultStatsWithCreditManagement();
+    }
+
+    // Use the same calculation as other components
+    const totalCreditSales = filteredCredits.reduce((sum, credit) => 
+      sum + CalculationUtils.safeNumber(credit.totalAmount), 0
+    );
+
+    const recognizedCreditRevenue = filteredCredits.reduce((sum, credit) => 
+      sum + CalculationUtils.safeNumber(credit.amountPaid), 0
+    );
+
+    const outstandingCredit = filteredCredits.reduce((sum, credit) => 
+      sum + CalculationUtils.safeNumber(credit.balanceDue), 0
+    );
+
+    const creditSalesCount = filteredCredits.length;
+
+    const averageCreditSale = creditSalesCount > 0 ? totalCreditSales / creditSalesCount : 0;
+
+    const creditCollectionRate = totalCreditSales > 0 ? 
+      (recognizedCreditRevenue / totalCreditSales) * 100 : 0;
+
+    return {
+      totalCreditSales: parseFloat(totalCreditSales.toFixed(2)),
+      recognizedCreditRevenue: parseFloat(recognizedCreditRevenue.toFixed(2)),
+      outstandingCredit: parseFloat(outstandingCredit.toFixed(2)),
+      averageCreditSale: parseFloat(averageCreditSale.toFixed(2)),
+      creditSalesCount,
+      creditCollectionRate: parseFloat(creditCollectionRate.toFixed(2))
+    };
+  };
+
   // Handle credit payment with proper balance calculation
   const handlePayment = async (values) => {
     try {
@@ -259,7 +334,6 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
         paymentMethod: values.paymentMethod,
         recordedBy: currentUser?.name || 'Admin',
         cashierName: currentUser?.name || 'Unknown Cashier',
-        // Update the credit record with new amounts
         amountPaid: newAmountPaid,
         balanceDue: newBalanceDue,
         status: newBalanceDue <= 0 ? 'paid' : 
@@ -276,12 +350,12 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
       setPaymentModalVisible(false);
       setSelectedCredit(null);
       paymentForm.resetFields();
-      fetchCredits(); // Refresh data
+      fetchCredits();
     } catch (error) {
       console.error('Error recording payment:', error);
       notification.error({
         message: 'Payment Failed',
-        description: error.message || 'Failed to record payment'
+        description: error.response?.data?.message || error.message
       });
     }
   };
@@ -315,12 +389,12 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
       setEditModalVisible(false);
       setSelectedCredit(null);
       editForm.resetFields();
-      fetchCredits(); // Refresh data
+      fetchCredits();
     } catch (error) {
       console.error('Error updating credit:', error);
       notification.error({
         message: 'Update Failed',
-        description: error.message || 'Failed to update credit record'
+        description: error.response?.data?.message || error.message
       });
     }
   };
@@ -335,63 +409,14 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
         description: 'Credit record has been deleted successfully.'
       });
 
-      fetchCredits(); // Refresh data
+      fetchCredits();
     } catch (error) {
       console.error('Error deleting credit:', error);
       notification.error({
         message: 'Delete Failed',
-        description: error.message || 'Failed to delete credit record'
+        description: error.response?.data?.message || error.message
       });
     }
-  };
-
-  // Calculate credit statistics with enhanced calculations
-  const calculateStats = () => {
-    const filteredCredits = getFilteredCredits();
-    
-    if (!Array.isArray(filteredCredits)) {
-      return {
-        totalPending: 0,
-        totalPartiallyPaid: 0,
-        totalOverdue: 0,
-        totalPaid: 0,
-        totalOutstanding: 0,
-        totalCollected: 0,
-        totalCredits: 0,
-        totalCreditAmount: 0,
-        collectionRate: 0
-      };
-    }
-
-    const totalPending = filteredCredits.filter(c => c && c.status === 'pending').length;
-    const totalPartiallyPaid = filteredCredits.filter(c => c && c.status === 'partially_paid').length;
-    const totalOverdue = filteredCredits.filter(c => c && c.status === 'overdue').length;
-    const totalPaid = filteredCredits.filter(c => c && c.status === 'paid').length;
-    
-    const totalOutstanding = filteredCredits
-      .filter(c => c && c.status !== 'paid')
-      .reduce((sum, credit) => sum + (credit.balanceDue || 0), 0);
-
-    const totalCollected = filteredCredits
-      .reduce((sum, credit) => sum + (credit.amountPaid || 0), 0);
-
-    const totalCreditAmount = filteredCredits
-      .reduce((sum, credit) => sum + (credit.totalAmount || 0), 0);
-
-    const collectionRate = totalCreditAmount > 0 ? 
-      (totalCollected / totalCreditAmount) * 100 : 0;
-
-    return {
-      totalPending,
-      totalPartiallyPaid,
-      totalOverdue,
-      totalPaid,
-      totalOutstanding,
-      totalCollected,
-      totalCredits: filteredCredits.length,
-      totalCreditAmount,
-      collectionRate: parseFloat(collectionRate.toFixed(2))
-    };
   };
 
   const filteredCredits = getFilteredCredits();
@@ -442,7 +467,7 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
     setEditModalVisible(true);
   };
 
-  // Enhanced columns for credits table with proper shop display
+  // FIXED: Enhanced columns with proper transaction ID handling
   const columns = [
     {
       title: 'Customer',
@@ -515,10 +540,45 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
       dataIndex: 'transactionId',
       key: 'transactionId',
       width: 120,
-      render: (transaction) => (
-        <Text code style={{ fontSize: '11px' }}>
-          {transaction?.transactionNumber || 'N/A'}
-        </Text>
+      render: (transactionId, record) => (
+        <Space direction="vertical" size={0}>
+          <Text code style={{ fontSize: '11px' }}>
+            {transactionId || record.transactionNumber || 'N/A'}
+          </Text>
+          {record.transactionDetails && (
+            <Tooltip title="View transaction details">
+              <Button 
+                type="link" 
+                size="small" 
+                icon={<FileTextOutlined />}
+                onClick={() => {
+                  if (record.transactionDetails) {
+                    Modal.info({
+                      title: 'Transaction Details',
+                      width: 600,
+                      content: (
+                        <Descriptions bordered size="small" column={1}>
+                          <Descriptions.Item label="Transaction ID">
+                            {record.transactionDetails.transactionNumber || transactionId}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="Date">
+                            {formatDate(record.transactionDetails.saleDate)}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="Total Amount">
+                            {formatCurrency(record.transactionDetails.totalAmount)}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="Items">
+                            {record.transactionDetails.items?.length || 0} items
+                          </Descriptions.Item>
+                        </Descriptions>
+                      )
+                    });
+                  }
+                }}
+              />
+            </Tooltip>
+          )}
+        </Space>
       )
     },
     {
@@ -729,7 +789,7 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
 
   useEffect(() => {
     fetchCredits();
-  }, [selectedShop, shops.length]); // Refetch when shop selection changes or shops are loaded
+  }, [fetchCredits]);
 
   return (
     <div style={{ padding: '24px' }}>
@@ -749,69 +809,72 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
         />
       )}
 
-      {/* Enhanced Statistics */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={12} sm={6} md={4}>
-          <Card size="small">
-            <Statistic
-              title="Total Outstanding"
-              value={stats.totalOutstanding}
-              precision={2}
-              prefix="KES"
-              valueStyle={{ color: '#cf1322', fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={4}>
-          <Card size="small">
-            <Statistic
-              title="Total Collected"
-              value={stats.totalCollected}
-              precision={2}
-              prefix="KES"
-              valueStyle={{ color: '#3f8600', fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={4}>
-          <Card size="small">
-            <Statistic
-              title="Collection Rate"
-              value={stats.collectionRate}
-              precision={1}
-              suffix="%"
-              valueStyle={{ color: '#1890ff', fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={4}>
-          <Card size="small">
-            <Statistic
-              title="Pending Credits"
-              value={stats.totalPending}
-              valueStyle={{ color: '#faad14', fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={4}>
-          <Card size="small">
-            <Statistic
-              title="Overdue"
-              value={stats.totalOverdue}
-              valueStyle={{ color: '#cf1322', fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={4}>
-          <Card size="small">
-            <Statistic
-              title="Total Credits"
-              value={stats.totalCredits}
-              valueStyle={{ color: '#722ed1', fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-      </Row>
+      {/* Credit Overview Section - Simplified */}
+      <Card style={{ marginBottom: 24 }} title={
+        <Space>
+          <ShopOutlined />
+          {selectedShop === 'all' ? 'All Shops' : getShopDisplayName(selectedShop)}
+          <Badge count={filteredCredits.length} showZero color="blue" />
+        </Space>
+      }>
+        <Row gutter={[16, 16]}>
+          {/* Total Credit Sales */}
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <Card size="small" bordered style={{ textAlign: 'center' }}>
+              <Text strong style={{ fontSize: '16px', color: '#1890ff' }}>
+                {formatCurrency(stats.totalCreditSales)}
+              </Text>
+              <div style={{ marginTop: '8px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Total Credit Sales
+                </Text>
+              </div>
+            </Card>
+          </Col>
+
+          {/* Recognized Credit Revenue */}
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <Card size="small" bordered style={{ textAlign: 'center' }}>
+              <Text strong style={{ fontSize: '16px', color: '#52c41a' }}>
+                {formatCurrency(stats.recognizedCreditRevenue)}
+              </Text>
+              <div style={{ marginTop: '8px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Credit Revenue Collected
+                </Text>
+              </div>
+            </Card>
+          </Col>
+
+          {/* Outstanding Credit */}
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <Card size="small" bordered style={{ textAlign: 'center' }}>
+              <Text strong style={{ fontSize: '16px', color: '#fa541c' }}>
+                {formatCurrency(stats.outstandingCredit)}
+              </Text>
+              <div style={{ marginTop: '8px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Outstanding Credit
+                </Text>
+              </div>
+            </Card>
+          </Col>
+
+          {/* Credit Sales Count */}
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <Card size="small" bordered style={{ textAlign: 'center' }}>
+              <Text strong style={{ fontSize: '16px', color: '#fa8c16' }}>
+                {stats.creditSalesCount}
+              </Text>
+              <div style={{ marginTop: '8px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Credit Transactions
+                </Text>
+              </div>
+            </Card>
+          </Col>
+        </Row>
+      </Card>
 
       {/* Enhanced Filters with Shop Display */}
       <Card style={{ marginBottom: 16 }}>
@@ -898,6 +961,11 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
                   Status: {statusFilter}
                 </Tag>
               )}
+              {searchTerm && (
+                <Tag color="green">
+                  Search: "{searchTerm}"
+                </Tag>
+              )}
             </Space>
           </Col>
         </Row>
@@ -919,6 +987,14 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
             <Text type="secondary">
               Shop: {selectedShop === 'all' ? `All Shops (${shops.length})` : getShopDisplayName(selectedShop)}
             </Text>
+            <Button 
+              icon={<SyncOutlined />} 
+              onClick={fetchCredits}
+              loading={loading}
+              size="small"
+            >
+              Refresh
+            </Button>
           </Space>
         }
       >
@@ -1103,7 +1179,7 @@ const CreditManagement = ({ currentUser, shops: initialShops = [] }) => {
           >
             <Descriptions size="small" column={1} style={{ marginBottom: 16 }}>
               <Descriptions.Item label="Transaction">
-                {selectedCredit.transactionId?.transactionNumber || 'N/A'}
+                {selectedCredit.transactionId || 'N/A'}
               </Descriptions.Item>
               <Descriptions.Item label="Total Amount">
                 {formatCurrency(selectedCredit.totalAmount)}

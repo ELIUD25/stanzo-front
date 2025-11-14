@@ -1,5 +1,5 @@
-// src/pages/Admin/ExpenseManagement.jsx - FIXED VERSION
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Table, 
@@ -18,7 +18,8 @@ import {
   Col,
   Statistic,
   Space,
-  Alert
+  Alert,
+  Tooltip
 } from 'antd';
 import { 
   DollarOutlined, 
@@ -27,9 +28,12 @@ import {
   DeleteOutlined, 
   HomeOutlined,
   ReloadOutlined,
-  ExclamationCircleOutlined 
+  ExclamationCircleOutlined,
+  SearchOutlined,
+  FilterOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
-import { expenseAPI, handleApiError, shopAPI } from '../../services/api';
+import { expenseAPI, shopAPI } from '../../services/api';
 import dayjs from 'dayjs';
 
 const ExpenseManagement = () => {
@@ -40,6 +44,7 @@ const ExpenseManagement = () => {
   const [loading, setLoading] = useState(false);
   const [shopLoading, setShopLoading] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [stats, setStats] = useState({
     totalExpenses: 0,
     totalAmount: 0,
@@ -47,6 +52,12 @@ const ExpenseManagement = () => {
   });
   const [form] = Form.useForm();
   const navigate = useNavigate();
+
+  // ✅ NEW: Search and filter states
+  const [searchText, setSearchText] = useState('');
+  const [selectedShopFilter, setSelectedShopFilter] = useState('all');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
+  const [selectedPaymentFilter, setSelectedPaymentFilter] = useState('all');
 
   const categories = [
     { value: 'rent', label: 'Rent', color: 'red' },
@@ -59,51 +70,115 @@ const ExpenseManagement = () => {
     { value: 'other', label: 'Other', color: 'gray' }
   ];
 
-  // Updated payment methods - only cash or mpesa/bank
   const paymentMethods = [
     { value: 'cash', label: 'Cash', color: 'green' },
     { value: 'mpesa', label: 'M-Pesa/Bank', color: 'blue' }
   ];
 
-  // Fetch shops data
-  const fetchShops = async () => {
+  // ✅ UPDATED: API response handler
+  const handleApiResponse = useCallback((response) => {
+    if (!response) return null;
+
+    if (Array.isArray(response)) {
+      return response;
+    }
+
+    if (response.success !== undefined) {
+      if (response.success) {
+        return response.data || response;
+      } else {
+        throw new Error(response.message || 'API request failed');
+      }
+    }
+
+    return response.data || response;
+  }, []);
+
+  // ✅ UPDATED: API error handler
+  const handleApiError = useCallback((error, defaultMessage) => {
+    let errorMessage = defaultMessage;
+    
+    if (error.response) {
+      const responseData = error.response.data;
+      errorMessage = responseData?.message || 
+                   responseData?.error || 
+                   `Server error: ${error.response.status}`;
+    } else if (error.request) {
+      errorMessage = 'No response from server. Please check if the backend is running.';
+    } else {
+      errorMessage = error.message;
+    }
+    
+    message.error(errorMessage);
+    return errorMessage;
+  }, []);
+
+  // ✅ UPDATED: Fetch shops with enhanced error handling
+  const fetchShops = useCallback(async () => {
     setShopLoading(true);
     try {
-      console.log('🏪 Fetching shops for expense management...');
-      const shopsData = await shopAPI.getAll();
-      console.log('✅ Shops loaded:', shopsData.length);
-      setShops(shopsData);
+      const response = await shopAPI.getAll();
+      const shopsData = handleApiResponse(response);
+      
+      if (shopsData && Array.isArray(shopsData)) {
+        setShops(shopsData);
+      } else {
+        console.warn('Unexpected shops response format:', shopsData);
+        setShops([]);
+      }
     } catch (error) {
-      console.error('❌ Error fetching shops:', error);
-      message.warning('Failed to load shops, using default shop');
+      console.error('Error fetching shops:', error);
+      const errorMessage = error.response?.data?.message || 
+                          error.message || 
+                          'Failed to load shops';
+      message.warning(errorMessage);
+      setShops([]);
     } finally {
       setShopLoading(false);
     }
-  };
+  }, [handleApiResponse]);
 
-  useEffect(() => {
-    fetchShops();
-    fetchExpenses();
-  }, []);
-
-  const fetchExpenses = async () => {
+  // ✅ UPDATED: Fetch expenses with enhanced error handling
+  const fetchExpenses = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      console.log('🔄 Fetching expenses data...');
-      const expensesData = await expenseAPI.getAll();
-      console.log('✅ Expenses loaded:', expensesData.length);
+      const response = await expenseAPI.getAll();
+      const expensesData = handleApiResponse(response);
       
-      setExpenses(expensesData);
-      calculateStats(expensesData);
+      if (expensesData && Array.isArray(expensesData)) {
+        setExpenses(expensesData);
+        calculateStats(expensesData);
+      } else {
+        setError('Invalid expenses data format received from server');
+      }
     } catch (error) {
-      console.error('❌ Error fetching expenses:', error);
-      message.error(handleApiError(error));
+      console.error('Error fetching expenses:', error);
+      const errorMessage = error.response?.data?.message || 
+                          error.message || 
+                          'Failed to load expenses. Please check your connection.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [handleApiResponse]);
 
-  const calculateStats = (expensesData) => {
+  useEffect(() => {
+    fetchExpenses();
+    fetchShops();
+  }, [fetchExpenses, fetchShops]);
+
+  // ✅ UPDATED: Calculate statistics
+  const calculateStats = useCallback((expensesData) => {
+    if (!expensesData || !Array.isArray(expensesData)) {
+      setStats({
+        totalExpenses: 0,
+        totalAmount: 0,
+        averageExpense: 0
+      });
+      return;
+    }
+
     const totalExpenses = expensesData.length;
     const totalAmount = expensesData.reduce((sum, expense) => sum + (expense.amount || 0), 0);
     const averageExpense = totalExpenses > 0 ? totalAmount / totalExpenses : 0;
@@ -113,7 +188,7 @@ const ExpenseManagement = () => {
       totalAmount,
       averageExpense
     });
-  };
+  }, []);
 
   const handleRefresh = () => {
     fetchExpenses();
@@ -136,7 +211,8 @@ const ExpenseManagement = () => {
     setIsModalVisible(true);
   };
 
-  const handleDeleteExpense = async (id) => {
+  // ✅ UPDATED: Delete expense with enhanced error handling
+  const handleDeleteExpense = useCallback(async (id) => {
     Modal.confirm({
       title: 'Confirm Delete',
       content: 'Are you sure you want to delete this expense? This action cannot be undone.',
@@ -152,47 +228,57 @@ const ExpenseManagement = () => {
           calculateStats(updatedExpenses);
           message.success('Expense deleted successfully');
         } catch (error) {
-          console.error('❌ Error deleting expense:', error);
-          message.error(handleApiError(error));
+          console.error('Error deleting expense:', error);
+          handleApiError(error, 'Failed to delete expense');
         }
       }
     });
-  };
+  }, [expenses, calculateStats, handleApiError]);
 
-  const handleSubmit = async (values) => {
+  // ✅ UPDATED: Prepare expense data for API
+  const prepareExpenseData = useCallback((values) => {
+    const selectedShop = shops.find(shop => shop._id === values.shop);
+    
+    if (!selectedShop) {
+      throw new Error('Selected shop not found. Please refresh and try again.');
+    }
+
+    // Get current user data for recordedBy field
+    const currentUser = JSON.parse(localStorage.getItem('adminData') || localStorage.getItem('cashierData') || '{}');
+    const recordedBy = currentUser.name || currentUser.email || 'System';
+
+    const expenseData = {
+      category: values.category,
+      amount: parseFloat(values.amount),
+      date: values.date ? values.date.toISOString() : new Date().toISOString(),
+      paymentMethod: values.paymentMethod,
+      description: values.description || `${values.category} expense`,
+      recordedBy: recordedBy,
+      shop: values.shop,
+      shopName: selectedShop.name || selectedShop.shopName,
+      status: 'completed',
+      notes: values.notes || '',
+      referenceNumber: `EXP-${Date.now().toString().slice(-6)}`
+    };
+
+    return expenseData;
+  }, [shops]);
+
+  // ✅ UPDATED: Handle form submission with enhanced error handling
+  const handleSubmit = useCallback(async (values) => {
     setFormLoading(true);
     try {
-      console.log('📝 Submitting expense with values:', values);
-      
-      // Get current user data for recordedBy field
-      const currentUser = JSON.parse(localStorage.getItem('adminData') || localStorage.getItem('cashierData') || '{}');
-      const recordedBy = currentUser.name || currentUser.email || 'System';
-      
-      // Get selected shop name
-      const selectedShop = shops.find(shop => shop._id === values.shop);
-      const shopName = selectedShop?.name || 'Unknown Shop';
+      const expenseData = prepareExpenseData(values);
 
-      // Prepare complete expense data with all required fields
-      const formattedValues = {
-        category: values.category,
-        amount: parseFloat(values.amount),
-        date: values.date ? values.date.toISOString() : new Date().toISOString(),
-        paymentMethod: values.paymentMethod,
-        description: values.description || `${values.category} expense`,
-        recordedBy: recordedBy,
-        shop: values.shop || (shops.length > 0 ? shops[0]._id : ''),
-        shopName: shopName,
-        status: 'completed',
-        // Include any other required fields from your backend
-        notes: values.notes || '',
-        referenceNumber: `EXP-${Date.now().toString().slice(-6)}`
-      };
-
-      console.log('📦 Complete expense data being sent:', formattedValues);
+      // Validation
+      if (!expenseData.amount || expenseData.amount <= 0) {
+        message.error('Amount must be greater than 0');
+        return;
+      }
 
       let result;
       if (editingExpense) {
-        result = await expenseAPI.update(editingExpense._id, formattedValues);
+        result = await expenseAPI.update(editingExpense._id, expenseData);
         const updatedExpenses = expenses.map(expense => 
           expense._id === editingExpense._id ? result : expense
         );
@@ -200,7 +286,7 @@ const ExpenseManagement = () => {
         calculateStats(updatedExpenses);
         message.success('Expense updated successfully');
       } else {
-        result = await expenseAPI.create(formattedValues);
+        result = await expenseAPI.create(expenseData);
         const newExpenses = [result, ...expenses];
         setExpenses(newExpenses);
         calculateStats(newExpenses);
@@ -210,13 +296,23 @@ const ExpenseManagement = () => {
       setIsModalVisible(false);
       form.resetFields();
     } catch (error) {
-      console.error('❌ Error submitting expense:', error);
-      const errorMessage = handleApiError(error);
-      message.error(errorMessage);
+      console.error('Error submitting expense:', error);
+      
+      if (error.response?.status === 400) {
+        message.error('Validation failed. Please check your input.');
+      } else if (error.response?.status === 409) {
+        message.error('An expense with similar details already exists');
+      } else if (error.response?.status === 404) {
+        message.error('Expense not found. It may have been deleted.');
+      } else {
+        const errorMessage = error.message || 
+                           (editingExpense ? 'Failed to update expense' : 'Failed to add expense');
+        message.error(errorMessage);
+      }
     } finally {
       setFormLoading(false);
     }
-  };
+  }, [editingExpense, expenses, calculateStats, form, prepareExpenseData]);
 
   const getCategoryColor = (category) => {
     return categories.find(cat => cat.value === category)?.color || 'default';
@@ -240,7 +336,106 @@ const ExpenseManagement = () => {
     return shop?.name || 'Unknown Shop';
   };
 
-  const columns = [
+  // ✅ NEW: Shop options for forms and filters
+  const shopOptions = useMemo(() => {
+    return shops.map(shop => ({
+      value: shop._id,
+      label: shop.name || shop.shopName || 'Unknown Shop',
+      key: shop._id
+    }));
+  }, [shops]);
+
+  // ✅ NEW: Shop filter options
+  const shopFilterOptions = useMemo(() => {
+    const baseOptions = [
+      { value: 'all', label: 'All Shops' }
+    ];
+    
+    return [...baseOptions, ...shopOptions];
+  }, [shopOptions]);
+
+  // ✅ NEW: Category filter options
+  const categoryFilterOptions = useMemo(() => {
+    const baseOptions = [
+      { value: 'all', label: 'All Categories' }
+    ];
+    
+    const categoryOptions = categories.map(cat => ({
+      value: cat.value,
+      label: cat.label
+    }));
+    
+    return [...baseOptions, ...categoryOptions];
+  }, [categories]);
+
+  // ✅ NEW: Payment method filter options
+  const paymentFilterOptions = useMemo(() => {
+    const baseOptions = [
+      { value: 'all', label: 'All Payment Methods' }
+    ];
+    
+    const paymentOptions = paymentMethods.map(pm => ({
+      value: pm.value,
+      label: pm.label
+    }));
+    
+    return [...baseOptions, ...paymentOptions];
+  }, [paymentMethods]);
+
+  // ✅ NEW: Filter expenses based on search and filters
+  const filteredExpenses = useMemo(() => {
+    if (!expenses || !Array.isArray(expenses)) return [];
+
+    return expenses.filter(expense => {
+      // Search filter
+      const matchesSearch = searchText === '' || 
+        (expense.description && expense.description.toLowerCase().includes(searchText.toLowerCase())) ||
+        (expense.category && expense.category.toLowerCase().includes(searchText.toLowerCase())) ||
+        (getShopName(expense.shop) && getShopName(expense.shop).toLowerCase().includes(searchText.toLowerCase())) ||
+        (expense.recordedBy && expense.recordedBy.toLowerCase().includes(searchText.toLowerCase()));
+
+      // Shop filter
+      const matchesShop = selectedShopFilter === 'all' || 
+        expense.shop === selectedShopFilter;
+
+      // Category filter
+      const matchesCategory = selectedCategoryFilter === 'all' || 
+        expense.category === selectedCategoryFilter;
+
+      // Payment method filter
+      const matchesPayment = selectedPaymentFilter === 'all' || 
+        expense.paymentMethod === selectedPaymentFilter;
+
+      return matchesSearch && matchesShop && matchesCategory && matchesPayment;
+    });
+  }, [expenses, searchText, selectedShopFilter, selectedCategoryFilter, selectedPaymentFilter, getShopName]);
+
+  // ✅ NEW: Search and filter handlers
+  const handleSearch = useCallback((value) => {
+    setSearchText(value);
+  }, []);
+
+  const handleShopFilterChange = useCallback((value) => {
+    setSelectedShopFilter(value);
+  }, []);
+
+  const handleCategoryFilterChange = useCallback((value) => {
+    setSelectedCategoryFilter(value);
+  }, []);
+
+  const handlePaymentFilterChange = useCallback((value) => {
+    setSelectedPaymentFilter(value);
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setSearchText('');
+    setSelectedShopFilter('all');
+    setSelectedCategoryFilter('all');
+    setSelectedPaymentFilter('all');
+  }, []);
+
+  // ✅ UPDATED: Table columns with enhanced features
+  const columns = useMemo(() => [
     { 
       title: 'Date', 
       dataIndex: 'date', 
@@ -301,6 +496,14 @@ const ExpenseManagement = () => {
       onFilter: (value, record) => record.paymentMethod === value,
     },
     { 
+      title: 'Description', 
+      dataIndex: 'description', 
+      key: 'description',
+      render: (desc) => desc || 'No description',
+      width: 150,
+      ellipsis: true
+    },
+    { 
       title: 'Recorded By', 
       dataIndex: 'recordedBy', 
       key: 'recordedBy',
@@ -314,25 +517,38 @@ const ExpenseManagement = () => {
       width: 100,
       render: (_, record) => (
         <Space>
-          <Button 
-            type="link" 
-            icon={<EditOutlined />} 
-            onClick={() => handleEditExpense(record)}
-            aria-label="Edit expense"
-            size="small"
-          />
-          <Button 
-            type="link" 
-            danger 
-            icon={<DeleteOutlined />} 
-            onClick={() => handleDeleteExpense(record._id)}
-            aria-label="Delete expense"
-            size="small"
-          />
+          <Tooltip title="Edit Expense">
+            <Button 
+              type="link" 
+              icon={<EditOutlined />} 
+              onClick={() => handleEditExpense(record)}
+              aria-label="Edit expense"
+              size="small"
+            />
+          </Tooltip>
+          <Tooltip title="Delete Expense">
+            <Button 
+              type="link" 
+              danger 
+              icon={<DeleteOutlined />} 
+              onClick={() => handleDeleteExpense(record._id)}
+              aria-label="Delete expense"
+              size="small"
+            />
+          </Tooltip>
         </Space>
       )
     },
-  ];
+  ], [handleEditExpense, handleDeleteExpense, getCategoryColor, getPaymentMethodColor, getShopName, shops, categories, paymentMethods]);
+
+  if (loading && expenses.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <Spin size="large" />
+        <p>Loading expenses...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="management-content">
@@ -379,6 +595,84 @@ const ExpenseManagement = () => {
         </Col>
       </Row>
 
+      {error && (
+        <Alert
+          message="Error Loading Expenses"
+          description={error}
+          type="error"
+          showIcon
+          action={
+            <Button size="small" onClick={fetchExpenses}>
+              Retry
+            </Button>
+          }
+          style={{ marginBottom: '20px' }}
+        />
+      )}
+
+      {/* ✅ NEW: Search and Filter Section */}
+      <Card 
+        title="Search & Filter"
+        style={{ marginBottom: '20px' }}
+        size="small"
+      >
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={6}>
+            <Input
+              placeholder="Search descriptions, categories, shops..."
+              prefix={<SearchOutlined />}
+              value={searchText}
+              onChange={(e) => handleSearch(e.target.value)}
+              allowClear
+            />
+          </Col>
+          <Col xs={24} sm={12} md={4}>
+            <Select
+              placeholder="Filter by Shop"
+              value={selectedShopFilter}
+              onChange={handleShopFilterChange}
+              options={shopFilterOptions}
+              style={{ width: '100%' }}
+              allowClear={false}
+            />
+          </Col>
+          <Col xs={24} sm={12} md={4}>
+            <Select
+              placeholder="Filter by Category"
+              value={selectedCategoryFilter}
+              onChange={handleCategoryFilterChange}
+              options={categoryFilterOptions}
+              style={{ width: '100%' }}
+              allowClear={false}
+            />
+          </Col>
+          <Col xs={24} sm={12} md={4}>
+            <Select
+              placeholder="Filter by Payment"
+              value={selectedPaymentFilter}
+              onChange={handlePaymentFilterChange}
+              options={paymentFilterOptions}
+              style={{ width: '100%' }}
+              allowClear={false}
+            />
+          </Col>
+          <Col xs={24} sm={12} md={3}>
+            <Button 
+              icon={<FilterOutlined />}
+              onClick={handleClearFilters}
+              style={{ width: '100%' }}
+            >
+              Clear Filters
+            </Button>
+          </Col>
+          <Col xs={24} sm={12} md={3}>
+            <div style={{ textAlign: 'right', color: '#666', fontSize: '14px' }}>
+              Showing: {filteredExpenses.length} of {expenses.length}
+            </div>
+          </Col>
+        </Row>
+      </Card>
+
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 style={{ margin: 0 }}>
@@ -396,13 +690,24 @@ const ExpenseManagement = () => {
               type="primary" 
               icon={<PlusOutlined />} 
               onClick={handleAddExpense}
+              disabled={shopOptions.length === 0}
             >
               Add Expense
             </Button>
           </Space>
         </div>
         
-        {expenses.length === 0 && !loading ? (
+        {shopOptions.length === 0 && !shopLoading && (
+          <Alert
+            message="No Shops Available"
+            description="You need to create shops first before adding expenses."
+            type="warning"
+            showIcon
+            style={{ marginBottom: '16px' }}
+          />
+        )}
+
+        {filteredExpenses.length === 0 && !loading ? (
           <Alert
             message="No Expenses Found"
             description="You haven't added any expenses yet. Click 'Add Expense' to get started."
@@ -412,7 +717,7 @@ const ExpenseManagement = () => {
         ) : (
           <Table 
             columns={columns} 
-            dataSource={expenses} 
+            dataSource={filteredExpenses} 
             rowKey="_id"
             loading={loading}
             pagination={{ 
@@ -422,7 +727,7 @@ const ExpenseManagement = () => {
               showTotal: (total, range) => 
                 `${range[0]}-${range[1]} of ${total} expenses`
             }}
-            scroll={{ x: 800 }}
+            scroll={{ x: 1000 }}
             size="middle"
             locale={{
               emptyText: loading ? 'Loading expenses...' : 'No expenses found'
@@ -472,14 +777,13 @@ const ExpenseManagement = () => {
             name="shop" 
             label="Shop" 
             rules={[{ required: true, message: 'Please select a shop' }]}
+            help={shopOptions.length === 0 ? "No shops available. Please add shops first." : undefined}
           >
             <Select 
               placeholder="Select shop"
               loading={shopLoading}
-              options={shops.map(shop => ({
-                value: shop._id,
-                label: shop.name
-              }))}
+              disabled={shopOptions.length === 0}
+              options={shopOptions}
             />
           </Form.Item>
 
@@ -566,6 +870,7 @@ const ExpenseManagement = () => {
               type="primary" 
               htmlType="submit" 
               loading={formLoading}
+              disabled={shopOptions.length === 0}
             >
               {editingExpense ? 'Update' : 'Add'} Expense
             </Button>

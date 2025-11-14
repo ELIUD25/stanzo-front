@@ -1,4 +1,3 @@
-// src/pages/Admin/ShopManagement.jsx
 import React, { useState, useEffect } from 'react';
 import { 
   Table, 
@@ -50,7 +49,8 @@ import {
   RiseOutlined,
   FallOutlined
 } from '@ant-design/icons';
-import axios from 'axios';
+import { shopAPI, unifiedAPI, creditAPI } from '../../services/api';
+import { CalculationUtils } from '../../utils/calculationUtils';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -67,43 +67,20 @@ const ShopManagement = () => {
   const [transactions, setTransactions] = useState([]);
   const [credits, setCredits] = useState([]);
   const [allCredits, setAllCredits] = useState([]);
-  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [creditsLoading, setCreditsLoading] = useState(false);
-  const [productsLoading, setProductsLoading] = useState(false);
   const [timeFilter, setTimeFilter] = useState('daily');
   const [customDateRange, setCustomDateRange] = useState(null);
   const [form] = Form.useForm();
 
-  const api = axios.create({
-    baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5001',
-    timeout: 10000,
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  });
-
-  api.interceptors.request.use(request => {
-    console.log('API Request:', { url: request.url, method: request.method, params: request.params, data: request.data });
-    return request;
-  });
-
-  api.interceptors.response.use(response => {
-    console.log('API Response:', { url: response.config.url, status: response.status, data: response.data });
-    return response;
-  }, error => {
-    console.error('API Error:', { url: error.config?.url, status: error.response?.status, message: error.message });
-    return Promise.reject(error);
-  });
-
   const fetchShops = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/api/shops');
-      setShops(response.data.data || response.data);
+      const shopsData = await shopAPI.getAll();
+      setShops(shopsData);
     } catch (error) {
-      message.error(error.response?.data?.error || 'Failed to fetch shops');
+      message.error('Failed to fetch shops');
     } finally {
       setLoading(false);
     }
@@ -116,8 +93,16 @@ const ShopManagement = () => {
         params.startDate = dateRange[0].format('YYYY-MM-DD');
         params.endDate = dateRange[1].format('YYYY-MM-DD');
       }
-      const response = await api.get(`/api/transactions/shop-performance/${shopId}`, { params });
-      setShopPerformance(response.data.data || {});
+      
+      // Use the unified API for comprehensive data
+      const response = await unifiedAPI.getCombinedTransactions({
+        shopId,
+        ...params
+      });
+      
+      // Extract shop-specific performance from the comprehensive data
+      const shopData = response.comprehensiveReport || response;
+      setShopPerformance(shopData.summary || {});
     } catch (error) {
       message.error('Failed to fetch shop performance data');
     }
@@ -126,13 +111,15 @@ const ShopManagement = () => {
   const fetchShopTransactions = async (shopId, period = 'daily', dateRange = null) => {
     setTransactionsLoading(true);
     try {
-      const params = { period, shopId };
+      const params = { shopId, dataType: 'basic' };
       if (dateRange) {
         params.startDate = dateRange[0].format('YYYY-MM-DD');
         params.endDate = dateRange[1].format('YYYY-MM-DD');
       }
-      const response = await api.get('/api/transactions', { params });
-      setTransactions(response.data.data || response.data || []);
+      
+      const response = await unifiedAPI.getCombinedTransactions(params);
+      const transactionsData = response.transactions || response.data?.transactions || [];
+      setTransactions(transactionsData);
     } catch (error) {
       message.error('Failed to fetch transactions');
     } finally {
@@ -143,14 +130,15 @@ const ShopManagement = () => {
   const fetchShopCredits = async (shopId, period = 'daily', dateRange = null) => {
     setCreditsLoading(true);
     try {
-      const params = { shopId };
+      const params = { shopId, analysisType: 'comprehensive' };
       if (dateRange) {
         params.startDate = dateRange[0].format('YYYY-MM-DD');
         params.endDate = dateRange[1].format('YYYY-MM-DD');
       }
-      const response = await api.get('/api/credits', { params });
-      const creditsData = response.data.data || response.data || [];
-
+      
+      const response = await unifiedAPI.getCombinedCreditAnalysis(params);
+      const creditsData = response.credits || response.comprehensive?.credits || [];
+      
       setAllCredits(creditsData);
 
       const outstandingCredits = creditsData.filter(credit => {
@@ -167,23 +155,6 @@ const ShopManagement = () => {
       setCredits([]);
     } finally {
       setCreditsLoading(false);
-    }
-  };
-
-  const fetchShopProducts = async (shopId) => {
-    setProductsLoading(true);
-    try {
-      const response = await api.get('/api/products');
-      const allProducts = response.data.data || response.data || [];
-      const shopProducts = allProducts.filter(product => 
-        product.shop === shopId || product.shopId === shopId
-      );
-      setProducts(shopProducts);
-    } catch (error) {
-      message.error('Failed to fetch products data');
-      setProducts([]);
-    } finally {
-      setProductsLoading(false);
     }
   };
 
@@ -234,8 +205,7 @@ const ShopManagement = () => {
       await Promise.all([
         fetchShopPerformance(shop._id, timeFilter, customDateRange),
         fetchShopTransactions(shop._id, timeFilter, customDateRange),
-        fetchShopCredits(shop._id, timeFilter, customDateRange),
-        fetchShopProducts(shop._id)
+        fetchShopCredits(shop._id, timeFilter, customDateRange)
       ]);
       setIsViewModalOpen(true);
     } catch (error) {
@@ -248,11 +218,11 @@ const ShopManagement = () => {
   const handleDeleteShop = async (id) => {
     try {
       setLoading(true);
-      await api.delete(`/api/shops/${id}`);
+      await shopAPI.delete(id);
       setShops(shops.filter(shop => shop._id !== id));
       message.success('Shop deleted successfully');
     } catch (error) {
-      message.error(error.response?.data?.error || 'Failed to delete shop');
+      message.error('Failed to delete shop');
     } finally {
       setLoading(false);
     }
@@ -269,53 +239,33 @@ const ShopManagement = () => {
       let response;
 
       if (editingShop) {
-        response = await api.put(`/api/shops/${editingShop._id}`, shopData);
-        setShops(shops.map(s => s._id === editingShop._id ? response.data.data : s));
+        response = await shopAPI.update(editingShop._id, shopData);
+        setShops(shops.map(s => s._id === editingShop._id ? response.data : s));
         message.success('Shop updated successfully');
       } else {
-        response = await api.post('/api/shops', shopData);
-        setShops([...shops, response.data.data || response.data]);
+        response = await shopAPI.create(shopData);
+        setShops([...shops, response.data]);
         message.success('Shop added successfully');
       }
 
       setIsModalOpen(false);
       form.resetFields();
     } catch (error) {
-      message.error(error.response?.data?.error || error.message || 'Failed to save shop');
+      message.error(error.message || 'Failed to save shop');
     } finally {
       setLoading(false);
     }
   };
 
-  const CalculationUtils = {
-    safeNumber: (value, fallback = 0) => {
-      if (value === null || value === undefined || value === '') return fallback;
-      const num = Number(value);
-      return isNaN(num) ? fallback : num;
-    },
-    formatCurrency: (amount) => {
-      const value = CalculationUtils.safeNumber(amount);
-      return `KES ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    },
-    getProfitColor: (profit) => {
-      const value = CalculationUtils.safeNumber(profit);
-      return value > 0 ? '#3f8600' : value < 0 ? '#cf1322' : '#d9d9d9';
-    },
-    getProfitIcon: (profit) => {
-      const value = CalculationUtils.safeNumber(profit);
-      return value >= 0 ? <RiseOutlined /> : <FallOutlined />;
-    },
-    calculateCOGS: () => {
-      let totalCOGS = 0;
-      transactions.forEach(transaction => {
-        transaction.items?.forEach(item => {
-          const buyingPrice = CalculationUtils.safeNumber(item.buyingPrice || item.costPrice || 0);
-          const quantity = CalculationUtils.safeNumber(item.quantity, 1);
-          totalCOGS += buyingPrice * quantity;
-        });
-      });
-      return totalCOGS;
-    }
+  // FIXED: Calculate COGS using the available utility functions
+  const calculateCOGS = (transactions) => {
+    if (!Array.isArray(transactions)) return 0;
+    
+    return transactions.reduce((sum, transaction) => {
+      // Use the enhanced cost calculation from CalculationUtils
+      const cost = CalculationUtils.calculateCostFromItems(transaction);
+      return sum + cost;
+    }, 0);
   };
 
   const calculatePerformanceMetrics = () => {
@@ -328,13 +278,10 @@ const ShopManagement = () => {
     const outstandingCredit = credits.reduce((sum, c) => sum + CalculationUtils.safeNumber(c.balanceDue), 0);
     const totalAmountPaid = allCredits.reduce((sum, c) => sum + CalculationUtils.safeNumber(c.amountPaid), 0);
 
-    const totalCOGS = CalculationUtils.calculateCOGS();
+    // FIXED: Use the local calculateCOGS function instead of CalculationUtils.calculateCOGS
+    const totalCOGS = calculateCOGS(transactions);
     const grossProfit = totalRevenue - totalCOGS;
     const netProfit = grossProfit; // No expenses, so Net Profit = Gross Profit
-
-    const lowStockProducts = products.filter(p => 
-      CalculationUtils.safeNumber(p.currentStock) <= CalculationUtils.safeNumber(p.minStockLevel, 5)
-    );
 
     const totalSales = transactions.length;
     const totalItemsSold = transactions.reduce((sum, t) => sum + CalculationUtils.safeNumber(t.itemsCount), 0);
@@ -351,9 +298,7 @@ const ShopManagement = () => {
       outstandingCredit: parseFloat(outstandingCredit.toFixed(2)),
       totalAmountPaid: parseFloat(totalAmountPaid.toFixed(2)),
       totalCredits: allCredits.length,
-      activeCredits: credits.length,
-      totalProducts: products.length,
-      lowStockCount: lowStockProducts.length
+      activeCredits: credits.length
     };
   };
 
@@ -461,7 +406,7 @@ const ShopManagement = () => {
             </div>
           )}
         </div>
-      </List.Item>
+    </List.Item>
     );
   };
 
@@ -548,12 +493,8 @@ const ShopManagement = () => {
             </Col>
             <Col xs={24} sm={12} md={8} lg={6}>
               <Card size="small">
-                <Statistic title="Products" value={metrics.totalProducts} valueStyle={{ color: '#1890ff' }} prefix={<ProductOutlined />} />
-              </Card>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Card size="small">
-                <Statistic title="Low Stock" value={metrics.lowStockCount} valueStyle={{ color: metrics.lowStockCount > 0 ? '#cf1322' : '#3f8600' }} prefix={<WarningOutlined />} />
+                <Statistic title="Amount Collected" value={metrics.totalAmountPaid} precision={2} prefix="KES" valueStyle={{ color: '#52c41a' }} prefix={<MoneyCollectOutlined />} />
+                <div style={{ marginTop: 4, fontSize: '11px', color: '#666', textAlign: 'center' }}>Collected from credits</div>
               </Card>
             </Col>
           </Row>
@@ -592,17 +533,6 @@ const ShopManagement = () => {
             </Col>
           </Row>
         </Card>
-
-        {(metrics.lowStockCount > 0) && (
-          <Alert
-            message={`${metrics.lowStockCount} products are low on stock`}
-            description="Some products need to be reordered to avoid stockouts."
-            type="warning"
-            showIcon
-            icon={<WarningOutlined />}
-            style={{ marginBottom: 16 }}
-          />
-        )}
 
         <Tabs defaultActiveKey="overview">
           <Tabs.TabPane tab="Financial Details" key="overview">
@@ -665,6 +595,7 @@ const ShopManagement = () => {
                 <Space>
                   <Tag color="blue">Given: {CalculationUtils.formatCurrency(metrics.creditGiven)}</Tag>
                   <Tag color="red">Outstanding: {CalculationUtils.formatCurrency(metrics.outstandingCredit)}</Tag>
+                  <Tag color="green">Collected: {CalculationUtils.formatCurrency(metrics.totalAmountPaid)}</Tag>
                 </Space>
               }
             >
@@ -672,36 +603,6 @@ const ShopManagement = () => {
                 <List dataSource={credits} renderItem={c => <CreditItem credit={c} />} pagination={{ pageSize: 10 }} />
               ) : (
                 <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>No outstanding credits</div>
-              )}
-            </Card>
-          </Tabs.TabPane>
-
-          <Tabs.TabPane tab="Products" key="products">
-            <Card title={`Shop Products (${products.length})`} loading={productsLoading}>
-              {products.length > 0 ? (
-                <List
-                  dataSource={products.slice(0, 10)}
-                  renderItem={product => (
-                    <List.Item>
-                      <List.Item.Meta
-                        avatar={<ProductOutlined />}
-                        title={product.name}
-                        description={
-                          <Space>
-                            <Tag color={product.currentStock <= (product.minStockLevel || 5) ? 'red' : 'green'}>
-                              Stock: {product.currentStock}
-                            </Tag>
-                            <Text type="secondary">Price: {CalculationUtils.formatCurrency(product.sellingPrice || product.price)}</Text>
-                            {product.currentStock <= (product.minStockLevel || 5) && <Tag color="red">Low Stock</Tag>}
-                          </Space>
-                        }
-                      />
-                    </List.Item>
-                  )}
-                  pagination={{ pageSize: 10 }}
-                />
-              ) : (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>No products found</div>
               )}
             </Card>
           </Tabs.TabPane>

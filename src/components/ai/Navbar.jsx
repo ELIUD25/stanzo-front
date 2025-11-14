@@ -7,7 +7,7 @@ const Navbar = () => {
   return (
     <header className="bg-white shadow">
       <div className="flex justify-between items-center p-4">
-        <h1 className="text-xl font-bold">Club Management System</h1>
+        <h1 className="text-xl font-bold">Shop Management System</h1>
         {user && (
           <div className="flex items-center space-x-4">
             <span>Welcome, {user.name}</span>

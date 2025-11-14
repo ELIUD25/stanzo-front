@@ -1,11 +1,11 @@
-// src/pages/Cashier/CashierDashboard.jsx - COMPLETE UPDATED VERSION
+// src/pages/Cashier/CashierDashboard.jsx - UPDATED WITH CONSISTENT STYLING
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Layout, Card, Row, Col, Statistic, Typography, Tag,
   Space, Button, Spin, Alert, Divider, List, Avatar, 
   Tabs, Input, Modal, Form, InputNumber, Tooltip, 
   FloatButton, notification, Empty, message, Descriptions,
-  Progress, Badge, Timeline, DatePicker, Table
+  Progress, Badge, Timeline, DatePicker, Table, Select
 } from 'antd';
 import {
   ShopOutlined, UserOutlined, DollarOutlined,
@@ -18,10 +18,11 @@ import {
   CalendarOutlined, BankOutlined, MoneyCollectOutlined,
   HistoryOutlined, WarningOutlined, CheckCircleOutlined,
   ClockCircleOutlined, TeamOutlined, ShoppingOutlined,
-  EyeOutlined, FileTextOutlined, InfoCircleOutlined
+  EyeOutlined, FileTextOutlined, InfoCircleOutlined,
+  RiseOutlined, FallOutlined, StockOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { authAPI, transactionAPI, productAPI, creditAPI } from '../../services/api';
+import { authAPI, unifiedAPI, productAPI, creditAPI, transactionAPI } from '../../services/api';
 import Cart from './Cart';
 import ReceiptTemplate from '../../components/ReceiptTemplate';
 import dayjs from 'dayjs';
@@ -30,8 +31,9 @@ const { Header, Content } = Layout;
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 const { Search } = Input;
+const { Option } = Select;
 
-// Enhanced Calculation Utilities
+// Enhanced Calculation Utilities with consistent styling
 const CashierCalculationUtils = {
   safeNumber: (value, fallback = 0) => {
     if (value === null || value === undefined || value === '') return fallback;
@@ -57,10 +59,39 @@ const CashierCalculationUtils = {
       grandTotal: subtotal,
       averageItemPrice: totalItems > 0 ? subtotal / totalItems : 0
     };
+  },
+
+  // Get color based on value (consistent with other components)
+  getValueColor: (value, type = 'default') => {
+    const numValue = CashierCalculationUtils.safeNumber(value);
+    
+    if (type === 'profit') {
+      if (numValue > 0) return '#3f8600'; // Green
+      if (numValue < 0) return '#cf1322'; // Red
+      return '#8c8c8c'; // Gray
+    }
+    
+    if (type === 'revenue') {
+      if (numValue > 0) return '#1890ff'; // Blue
+      return '#8c8c8c';
+    }
+    
+    if (type === 'warning') {
+      if (numValue > 0) return '#fa8c16'; // Orange
+      return '#8c8c8c';
+    }
+    
+    return '#595959'; // Default
+  },
+
+  // Get profit icon (consistent with other components)
+  getProfitIcon: (profit) => {
+    const value = CashierCalculationUtils.safeNumber(profit);
+    return value >= 0 ? <RiseOutlined /> : <FallOutlined />;
   }
 };
 
-// Default stats
+// Default stats with enhanced structure
 const getDefaultCashierStats = () => ({
   totalSales: 0,
   totalTransactions: 0,
@@ -71,8 +102,38 @@ const getDefaultCashierStats = () => ({
   creditAmount: 0,
   cashierItemsSold: 0,
   creditTransactions: 0,
-  creditGivenToday: 0
+  creditGivenToday: 0,
+  profitMargin: 0,
+  collectionRate: 0
 });
+
+// Color scheme matching your other components
+const COLOR_SCHEME = {
+  primary: '#1890ff',
+  success: '#52c41a',
+  warning: '#fa8c16',
+  error: '#f5222d',
+  info: '#13c2c2',
+  purple: '#722ed1',
+  magenta: '#eb2f96',
+  gold: '#faad14',
+  cyan: '#08979c',
+  
+  // Background colors
+  background: {
+    light: '#f5f5f5',
+    card: '#ffffff',
+    header: '#001529'
+  },
+  
+  // Status colors
+  status: {
+    completed: '#52c41a',
+    pending: '#fa8c16',
+    credit: '#f5222d',
+    active: '#1890ff'
+  }
+};
 
 const CashierDashboard = () => {
   const navigate = useNavigate();
@@ -133,95 +194,20 @@ const CashierDashboard = () => {
     [dailyStats.totalSales, dailyStats.creditAmount]
   );
 
-  // ADD THE MISSING VALIDATION FUNCTIONS
-  const validateCashBankMpesaPayment = () => {
-    const { cashAmount, bankMpesaAmount, totalAmount } = cashBankMpesaSplit;
-    
-    if (totalAmount.toFixed(2) !== totals.subtotal.toFixed(2)) {
-      message.error(`The sum of Cash and Bank/Mpesa (KES ${totalAmount.toLocaleString()}) must equal the total amount (KES ${totals.subtotal.toLocaleString()})`);
-      return false;
-    }
-    
-    if (cashAmount < 0 || bankMpesaAmount < 0) {
-      message.error('Cash and Bank/Mpesa amounts cannot be negative');
-      return false;
-    }
-    
-    return true;
-  };
+  // Enhanced cart calculations with consistent formatting
+  const totals = useMemo(() => {
+    return CashierCalculationUtils.calculateCartTotals(cart);
+  }, [cart]);
 
-  const validateCreditPayment = async () => {
-    try {
-      const values = await creditForm.validateFields();
-      
-      if (values.amountPaid < 0) {
-        message.error('Amount paid cannot be negative');
-        return false;
-      }
-      
-      if (values.amountPaid > totals.subtotal) {
-        message.error('Amount paid cannot exceed total amount');
-        return false;
-      }
-      
-      if (values.balance < 0) {
-        message.error('Balance cannot be negative');
-        return false;
-      }
-      
-      if (!values.shopName || !values.shopId) {
-        message.error('Shop information is required for credit transactions');
-        return false;
-      }
-      
-      return true;
-    } catch (error) {
-      message.error('Please fill all required fields correctly');
-      return false;
-    }
-  };
-
-  // ADD CASH/BANK-MPESA SPLIT HANDLER
-  const handleCashBankMpesaChange = (changedValues, allValues) => {
-    const cashAmount = parseFloat(allValues.cashAmount || 0);
-    const bankMpesaAmount = parseFloat(allValues.bankMpesaAmount || 0);
-    const total = cashAmount + bankMpesaAmount;
-    
-    setCashBankMpesaSplit({
-      cashAmount,
-      bankMpesaAmount,
-      totalAmount: total
-    });
-  };
-
-  // ADD CREDIT PAYMENT CHANGE HANDLER
-  const handleCreditPaymentChange = (changedValues, allValues) => {
-    const amountPaid = parseFloat(allValues.amountPaid || 0);
-    const totalAmount = totals.subtotal;
-    const balance = totalAmount - amountPaid;
-    
-    setCreditPaymentData(prev => ({
-      ...prev,
-      amountPaid,
-      balance: Math.max(0, balance),
-      shopName: allValues.shopName || prev.shopName,
-      shopId: allValues.shopId || prev.shopId
-    }));
-  };
-
-  // Company information
+  // Company information with enhanced styling
   const companyInfo = useMemo(() => ({
     name: "STANZO SHOP",
     address: "Mikinduri, Kenya",
     phone: "+254 746919850",
     email: "stanzokinyua5967@gmail.com",
-    slogan: "Quality Products, Best Prices"
+    slogan: "Quality Products, Best Prices",
+    logo: "🏪"
   }), []);
-
-  // Cart calculations
-  const totals = useMemo(() => {
-    return CashierCalculationUtils.calculateCartTotals(cart);
-  }, [cart]);
 
   // Initialize dashboard
   useEffect(() => {
@@ -267,7 +253,7 @@ const CashierDashboard = () => {
     return true;
   }, [selectedShop, cashier]);
 
-  // Fetch cashier daily stats with credit integration
+  // Enhanced fetch function with consistent error handling
   const fetchCashierDailyStats = useCallback(async () => {
     if (!cashier?._id || !selectedShop?._id) return;
 
@@ -276,17 +262,52 @@ const CashierDashboard = () => {
     try {
       console.log('📊 Fetching enhanced cashier daily stats...');
 
-      const analysisData = await transactionAPI.getCashierDailyAnalysis(
-        cashier._id, 
-        selectedShop._id, 
-        dayjs().toISOString()
+      const today = dayjs().startOf('day').toISOString();
+      const now = dayjs().toISOString();
+
+      // Use unified API to get combined data
+      const combinedData = await unifiedAPI.getCombinedTransactions({
+        cashierId: cashier._id,
+        shopId: selectedShop._id,
+        startDate: today,
+        endDate: now,
+        status: 'completed'
+      });
+
+      // Extract and transform data for cashier dashboard
+      const transactions = combinedData.transactions || [];
+      const summary = combinedData.summary || {};
+      const enhancedStats = combinedData.enhancedStats?.financialStats || {};
+
+      // Calculate cashier-specific stats
+      const totalSales = summary.totalRevenue || enhancedStats.totalRevenue || 0;
+      const totalTransactions = transactions.length;
+      const creditAmount = enhancedStats.creditSales || summary.creditSales || 0;
+      const creditTransactions = transactions.filter(t => t.paymentMethod === 'credit').length;
+      const cashAmount = enhancedStats.totalCash || summary.totalCash || 0;
+      const bankMpesaAmount = enhancedStats.totalMpesaBank || summary.totalMpesaBank || 0;
+      const cashierItemsSold = transactions.reduce((sum, t) => 
+        sum + (t.items?.reduce((itemSum, item) => itemSum + (item.quantity || 0), 0) || 0), 0
       );
-      
-      if (analysisData.success && analysisData.data) {
-        setDailyStats(analysisData.data);
-      } else {
-        await fetchDailySalesFallback();
-      }
+
+      // Enhanced stats with profit calculation
+      const costOfGoods = transactions.reduce((sum, t) => sum + (t.cost || 0), 0);
+      const grossProfit = totalSales - costOfGoods;
+      const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
+
+      setDailyStats({
+        totalSales,
+        totalTransactions,
+        creditAmount,
+        creditTransactions,
+        cashAmount,
+        bankMpesaAmount,
+        cashierItemsSold,
+        averageTransaction: totalTransactions > 0 ? totalSales / totalTransactions : 0,
+        creditGivenToday: creditAmount,
+        profitMargin,
+        collectionRate: creditAmount > 0 ? ((creditAmount - (enhancedStats.outstandingCredit || 0)) / creditAmount) * 100 : 0
+      });
 
     } catch (error) {
       console.error('❌ Error fetching enhanced cashier daily stats:', error);
@@ -296,7 +317,7 @@ const CashierDashboard = () => {
     }
   }, [cashier, selectedShop]);
 
-  // Fetch today's transactions and credits
+  // Enhanced today's transactions fetch
   const fetchTodayTransactions = useCallback(async () => {
     if (!cashier?._id || !selectedShop?._id) return;
 
@@ -306,8 +327,8 @@ const CashierDashboard = () => {
       const today = dayjs().startOf('day').toISOString();
       const now = dayjs().toISOString();
 
-      // Fetch today's transactions
-      const transactionsResponse = await transactionAPI.getAll({
+      // Use unified API for transactions
+      const transactionsData = await unifiedAPI.getCombinedTransactions({
         cashierId: cashier._id,
         shopId: selectedShop._id,
         startDate: today,
@@ -315,18 +336,18 @@ const CashierDashboard = () => {
         status: 'completed'
       });
 
-      const transactions = Array.isArray(transactionsResponse) ? transactionsResponse : [];
+      const transactions = transactionsData.transactions || [];
       setTodayTransactions(transactions);
 
-      // Fetch today's credits
-      const creditsResponse = await creditAPI.getAll({
+      // Use unified API for credit analysis
+      const creditAnalysis = await unifiedAPI.getCombinedCreditAnalysis({
         cashierId: cashier._id,
         shopId: selectedShop._id,
         startDate: today,
         endDate: now
       });
 
-      const creditsData = Array.isArray(creditsResponse?.data) ? creditsResponse.data : [];
+      const creditsData = creditAnalysis.credits || creditAnalysis.creditTransactions || [];
       setTodayCredits(creditsData);
 
     } catch (error) {
@@ -336,49 +357,7 @@ const CashierDashboard = () => {
     }
   }, [cashier, selectedShop]);
 
-  // Fallback function for basic stats calculation
-  const fetchDailySalesFallback = async () => {
-    try {
-      const today = dayjs().startOf('day').toISOString();
-      const now = dayjs().toISOString();
-      
-      const response = await transactionAPI.getAll({
-        cashierId: cashier._id,
-        shopId: selectedShop._id,
-        startDate: today,
-        endDate: now,
-        status: 'completed'
-      });
-      
-      const transactions = Array.isArray(response) ? response : [];
-      
-      // Calculate basic stats
-      const totalSales = transactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
-      const totalTransactions = transactions.length;
-      const creditAmount = transactions
-        .filter(t => t.paymentMethod === 'credit')
-        .reduce((sum, t) => sum + (t.totalAmount || 0), 0);
-      const creditTransactions = transactions.filter(t => t.paymentMethod === 'credit').length;
-
-      setDailyStats({
-        totalSales,
-        totalTransactions,
-        creditAmount,
-        creditTransactions,
-        cashAmount: totalSales - creditAmount,
-        bankMpesaAmount: 0,
-        cashierItemsSold: transactions.reduce((sum, t) => 
-          sum + (t.items?.reduce((itemSum, item) => itemSum + (item.quantity || 0), 0) || 0), 0
-        )
-      });
-      
-    } catch (fallbackError) {
-      console.error('❌ Fallback calculation failed:', fallbackError);
-      setDailyStats(getDefaultCashierStats());
-    }
-  };
-
-  // Fetch products for POS
+  // Enhanced products fetch with better filtering
   const fetchProducts = async (showMessage = false) => {
     if (!validateShopAndCashier()) return;
     
@@ -406,7 +385,7 @@ const CashierDashboard = () => {
       )];
       setCategories(uniqueCategories);
 
-      // Low stock analysis
+      // Enhanced low stock analysis
       const lowStock = shopProducts.filter(product => 
         product.currentStock > 0 && product.currentStock <= (product.minStockLevel || 5)
       );
@@ -427,7 +406,7 @@ const CashierDashboard = () => {
     }
   };
 
-  // Enhanced cart functions
+  // Enhanced cart functions with better user feedback
   const addToCart = (product, quantity = 1, customPrice = null) => {
     if (!product._id) {
       console.error('❌ Cannot add product to cart: product ID is missing', product);
@@ -485,6 +464,14 @@ const CashierDashboard = () => {
       }
     });
 
+    // Show success notification
+    notification.success({
+      message: 'Product Added',
+      description: `${quantity} x ${product.name} added to cart`,
+      placement: 'topRight',
+      duration: 2,
+    });
+
     if (scanMode) {
       setBarcodeInput('');
     }
@@ -526,61 +513,12 @@ const CashierDashboard = () => {
       okType: 'danger',
       onOk() {
         setCart([]);
-        message.success('Cart cleared');
+        message.success('Cart cleared successfully');
       }
     });
   };
 
-  const handlePrintReceipt = () => {
-    const receiptWindow = window.open('', '_blank');
-    if (receiptWindow) {
-      receiptWindow.document.write(`
-        <html>
-          <head>
-            <title>Receipt - ${currentTransaction?.receiptNumber}</title>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 20px; }
-              @media print { body { margin: 0; } }
-            </style>
-          </head>
-          <body>
-            <div id="receipt-content"></div>
-            <script>
-              window.onload = function() {
-                window.print();
-                setTimeout(() => window.close(), 1000);
-              };
-            </script>
-          </body>
-        </html>
-      `);
-      
-      const receiptContent = document.getElementById('receipt-print-content');
-      if (receiptContent) {
-        receiptWindow.document.getElementById('receipt-content').innerHTML = receiptContent.innerHTML;
-      }
-    }
-  };
-
-  const handleCloseReceipt = () => {
-    setShowReceipt(false);
-    setCurrentTransaction(null);
-  };
-
-  const formatCurrency = (amount) => {
-    return CashierCalculationUtils.formatCurrency(amount);
-  };
-
-  const handleLogout = () => {
-    authAPI.logout();
-    navigate('/cashier/login');
-  };
-
-  const handleBackToShops = () => {
-    navigate('/cashier/shops');
-  };
-
-  // Payment method selection and processing
+  // Enhanced payment method selection
   const handlePaymentMethodSelect = (method) => {
     setSelectedPaymentMethod(method);
     
@@ -618,40 +556,7 @@ const CashierDashboard = () => {
     setPaymentModalVisible(true);
   };
 
-  // Process Payment
-  const processPayment = async () => {
-    if (selectedPaymentMethod === 'cash_bank_mpesa') {
-      if (!validateCashBankMpesaPayment()) return;
-      
-      await handleCheckout('cash_bank_mpesa', {
-        cashAmount: cashBankMpesaSplit.cashAmount,
-        bankMpesaAmount: cashBankMpesaSplit.bankMpesaAmount
-      });
-      
-    } else if (selectedPaymentMethod === 'credit') {
-      if (!await validateCreditPayment()) return;
-      
-      const values = creditForm.getFieldsValue();
-      
-      await handleCheckout('credit', {
-        amountPaid: values.amountPaid,
-        balance: values.balance,
-        customerName: values.customerName,
-        customerPhone: values.customerPhone,
-        dueDate: values.dueDate,
-        shopName: values.shopName,
-        shopId: values.shopId
-      });
-      
-    } else {
-      await handleCheckout(selectedPaymentMethod);
-    }
-    
-    setPaymentModalVisible(false);
-    setSelectedPaymentMethod(null);
-  };
-
-  // Checkout Function
+  // Enhanced checkout with better error handling
   const handleCheckout = async (paymentMethod, paymentDetails = {}) => {
     if (!validateShopAndCashier()) return;
 
@@ -672,7 +577,7 @@ const CashierDashboard = () => {
         return `TXN-${timestamp}-${random}`.toUpperCase();
       };
 
-      // Transaction data
+      // Enhanced transaction data with credit support
       const transactionData = {
         shop: selectedShop._id,
         shopName: selectedShop.name,
@@ -687,17 +592,22 @@ const CashierDashboard = () => {
           quantity: Number(item.quantity),
           price: Number(item.price),
           totalPrice: Number(item.price * item.quantity),
-          barcode: item.barcode
+          barcode: item.barcode,
+          costPrice: item.product?.buyingPrice || 0
         })),
         totalAmount: Number(totals.subtotal),
         paymentMethod: paymentMethod,
         status: 'completed',
         itemsCount: Number(totals.totalItems),
         saleDate: new Date().toISOString(),
-        receiptNumber: `RCP-${Date.now()}`
+        receiptNumber: `RCP-${Date.now()}`,
+        cost: cart.reduce((sum, item) => {
+          const costPrice = item.product?.buyingPrice || 0;
+          return sum + (costPrice * item.quantity);
+        }, 0)
       };
 
-      // Enhanced payment data for credit
+      // Enhanced payment data for different methods
       if (paymentMethod === 'cash_bank_mpesa') {
         transactionData.cashAmount = paymentDetails.cashAmount;
         transactionData.bankMpesaAmount = paymentDetails.bankMpesaAmount;
@@ -706,31 +616,36 @@ const CashierDashboard = () => {
           bank_mpesa: paymentDetails.bankMpesaAmount
         };
       } else if (paymentMethod === 'credit') {
-        transactionData.amountPaid = paymentDetails.amountPaid;
-        transactionData.balanceDue = paymentDetails.balance;
+        transactionData.amountPaid = paymentDetails.amountPaid || 0;
+        transactionData.balanceDue = paymentDetails.balance || totals.subtotal;
         transactionData.dueDate = paymentDetails.dueDate;
         transactionData.creditStatus = paymentDetails.balance > 0 ? 'pending' : 'paid';
         transactionData.status = paymentDetails.balance > 0 ? 'credit' : 'completed';
         transactionData.creditShopName = paymentDetails.shopName;
         transactionData.creditShopId = paymentDetails.shopId;
+        transactionData.isCredit = true;
+        
+        if (paymentDetails.amountPaid > 0 && paymentDetails.balance > 0) {
+          transactionData.creditStatus = 'partially_paid';
+        }
       }
 
-      console.log('💰 Sending transaction data:', transactionData);
+      console.log('💰 Sending enhanced transaction data:', transactionData);
 
-      // Create transaction
       const response = await transactionAPI.create(transactionData);
       const transactionResult = response?.data || response;
       
       if (transactionResult && transactionResult._id) {
-        // Create credit record if it's a credit transaction
+        // Create credit record if it's a credit transaction with balance
         if (paymentMethod === 'credit' && paymentDetails.balance > 0) {
           try {
             const creditRecord = {
               transactionId: transactionResult._id,
+              transactionNumber: transactionResult.transactionNumber,
               customerName: paymentDetails.customerName,
               customerPhone: paymentDetails.customerPhone,
               totalAmount: totals.subtotal,
-              amountPaid: paymentDetails.amountPaid,
+              amountPaid: paymentDetails.amountPaid || 0,
               balanceDue: paymentDetails.balance,
               dueDate: paymentDetails.dueDate,
               shopId: selectedShop._id,
@@ -739,26 +654,40 @@ const CashierDashboard = () => {
               cashierName: cashier.name,
               status: 'pending',
               creditShopName: paymentDetails.shopName,
-              creditShopId: paymentDetails.shopId
+              creditShopId: paymentDetails.shopId,
+              items: cart.map(item => ({
+                productId: item.productId,
+                productName: item.name,
+                quantity: item.quantity,
+                price: item.price
+              }))
             };
             
             await creditAPI.create(creditRecord);
-            console.log('✅ Credit record created');
+            console.log('✅ Credit record created successfully');
           } catch (creditError) {
             console.error('❌ Error creating credit record:', creditError);
+            notification.warning({
+              message: 'Credit Record Warning',
+              description: 'Transaction completed but credit record creation failed. Please create credit record manually.',
+              duration: 5,
+            });
           }
         }
         
         setCurrentTransaction(transactionResult);
         setShowReceipt(true);
         
-        // Refresh stats and today's data
-        await fetchCashierDailyStats();
-        await fetchTodayTransactions();
+        // Enhanced data refresh
+        await Promise.all([
+          fetchCashierDailyStats(),
+          fetchTodayTransactions(),
+          fetchProducts()
+        ]);
         
         notification.success({
-          message: 'Transaction Completed',
-          description: `Sale completed successfully for ${selectedShop?.name}. Total: ${formatCurrency(totals.subtotal)}`,
+          message: 'Transaction Completed Successfully',
+          description: `Sale completed for ${selectedShop?.name}. Total: ${CashierCalculationUtils.formatCurrency(totals.subtotal)}`,
           duration: 3,
         });
 
@@ -776,6 +705,8 @@ const CashierDashboard = () => {
         errorMessage = `Stock error: ${error.message}`;
       } else if (error.message.includes('network') || error.message.includes('Network')) {
         errorMessage = 'Network error. Please check your connection.';
+      } else if (error.message.includes('credit')) {
+        errorMessage = 'Credit processing error. Please check credit details.';
       }
       
       notification.error({
@@ -790,17 +721,18 @@ const CashierDashboard = () => {
     }
   };
 
-  // Today's Transactions Display Component
+  // Enhanced Today's Transactions Display Component
   const TodaysTransactionsCard = () => {
     const allTransactions = [...todayTransactions];
 
-    // Calculate totals
+    // Calculate totals with enhanced formatting
     const totalSales = allTransactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
     const creditSales = allTransactions
       .filter(t => t.paymentMethod === 'credit')
       .reduce((sum, t) => sum + (t.totalAmount || 0), 0);
     const cashSales = totalSales - creditSales;
 
+    // Enhanced transaction columns with consistent styling
     const transactionColumns = [
       {
         title: 'Transaction',
@@ -830,14 +762,24 @@ const CashierDashboard = () => {
         dataIndex: 'paymentMethod',
         key: 'paymentMethod',
         width: 100,
-        render: (method) => (
-          <Tag 
-            color={method === 'credit' ? 'orange' : method === 'cash_bank_mpesa' ? 'purple' : 'green'}
-            style={{ fontSize: '11px', margin: 0 }}
-          >
-            {method?.toUpperCase() || 'CASH'}
-          </Tag>
-        )
+        render: (method) => {
+          const methodConfig = {
+            credit: { color: COLOR_SCHEME.warning, text: 'CREDIT' },
+            cash_bank_mpesa: { color: COLOR_SCHEME.purple, text: 'SPLIT' },
+            cash: { color: COLOR_SCHEME.success, text: 'CASH' },
+            bank_mpesa: { color: COLOR_SCHEME.primary, text: 'DIGITAL' }
+          };
+          const config = methodConfig[method] || { color: COLOR_SCHEME.gold, text: method?.toUpperCase() };
+          
+          return (
+            <Tag 
+              color={config.color}
+              style={{ fontSize: '11px', margin: 0, fontWeight: 'bold' }}
+            >
+              {config.text}
+            </Tag>
+          );
+        }
       },
       {
         title: 'Items',
@@ -845,7 +787,7 @@ const CashierDashboard = () => {
         key: 'itemsCount',
         width: 60,
         render: (count) => (
-          <Text style={{ fontSize: '12px' }}>{count || 0}</Text>
+          <Badge count={count} showZero style={{ backgroundColor: COLOR_SCHEME.cyan }} />
         )
       },
       {
@@ -854,8 +796,11 @@ const CashierDashboard = () => {
         key: 'totalAmount',
         width: 100,
         render: (amount) => (
-          <Text strong style={{ fontSize: '12px' }}>
-            {formatCurrency(amount)}
+          <Text strong style={{ 
+            fontSize: '12px',
+            color: CashierCalculationUtils.getValueColor(amount, 'revenue')
+          }}>
+            {CashierCalculationUtils.formatCurrency(amount)}
           </Text>
         )
       },
@@ -868,8 +813,8 @@ const CashierDashboard = () => {
           const isCredit = record.paymentMethod === 'credit';
           return (
             <Tag 
-              color={isCredit ? 'orange' : 'green'}
-              style={{ fontSize: '10px', margin: 0 }}
+              color={isCredit ? COLOR_SCHEME.warning : COLOR_SCHEME.success}
+              style={{ fontSize: '10px', margin: 0, fontWeight: 'bold' }}
             >
               {isCredit ? 'CREDIT' : 'PAID'}
             </Tag>
@@ -878,6 +823,7 @@ const CashierDashboard = () => {
       }
     ];
 
+    // Enhanced credit columns
     const creditColumns = [
       {
         title: 'Customer',
@@ -916,7 +862,7 @@ const CashierDashboard = () => {
         width: 100,
         render: (amount) => (
           <Text strong style={{ fontSize: '12px' }}>
-            {formatCurrency(amount)}
+            {CashierCalculationUtils.formatCurrency(amount)}
           </Text>
         )
       },
@@ -927,7 +873,7 @@ const CashierDashboard = () => {
         width: 100,
         render: (amount) => (
           <Text type="success" style={{ fontSize: '12px' }}>
-            {formatCurrency(amount)}
+            {CashierCalculationUtils.formatCurrency(amount)}
           </Text>
         )
       },
@@ -938,7 +884,7 @@ const CashierDashboard = () => {
         width: 100,
         render: (balance) => (
           <Text strong type="danger" style={{ fontSize: '12px' }}>
-            {formatCurrency(balance)}
+            {CashierCalculationUtils.formatCurrency(balance)}
           </Text>
         )
       },
@@ -949,14 +895,14 @@ const CashierDashboard = () => {
         width: 100,
         render: (status) => {
           const statusConfig = {
-            pending: { color: 'orange', text: 'PENDING' },
-            partially_paid: { color: 'blue', text: 'PARTIAL' },
-            paid: { color: 'green', text: 'PAID' },
-            overdue: { color: 'red', text: 'OVERDUE' }
+            pending: { color: COLOR_SCHEME.warning, text: 'PENDING' },
+            partially_paid: { color: COLOR_SCHEME.primary, text: 'PARTIAL' },
+            paid: { color: COLOR_SCHEME.success, text: 'PAID' },
+            overdue: { color: COLOR_SCHEME.error, text: 'OVERDUE' }
           };
           const config = statusConfig[status] || statusConfig.pending;
           return (
-            <Tag color={config.color} style={{ fontSize: '10px', margin: 0 }}>
+            <Tag color={config.color} style={{ fontSize: '10px', margin: 0, fontWeight: 'bold' }}>
               {config.text}
             </Tag>
           );
@@ -966,32 +912,36 @@ const CashierDashboard = () => {
 
     return (
       <div>
-        {/* Summary Cards */}
+        {/* Enhanced Summary Cards */}
         <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
           <Col xs={12} sm={8} md={6}>
-            <Card size="small">
+            <Card 
+              size="small"
+              style={{ borderLeft: `4px solid ${COLOR_SCHEME.success}` }}
+            >
               <Statistic
-                title="Total Sales (Including Credit)"
+                title="Total Sales"
                 value={totalSales}
                 precision={2}
                 prefix="KES"
-                valueStyle={{ color: '#3f8600', fontSize: '16px' }}
-                suffix={
-                  <Tooltip title="Includes all sales: Cash, Bank/Mpesa, and Credit">
-                    <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: '12px' }} />
-                  </Tooltip>
-                }
+                valueStyle={{ color: COLOR_SCHEME.success, fontSize: '16px' }}
               />
+              <Text type="secondary" style={{ fontSize: '11px' }}>
+                All payment methods
+              </Text>
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
-            <Card size="small">
+            <Card 
+              size="small"
+              style={{ borderLeft: `4px solid ${COLOR_SCHEME.warning}` }}
+            >
               <Statistic
                 title="Credit Sales"
                 value={creditSales}
                 precision={2}
                 prefix="KES"
-                valueStyle={{ color: '#fa8c16', fontSize: '16px' }}
+                valueStyle={{ color: COLOR_SCHEME.warning, fontSize: '16px' }}
               />
               <Text type="secondary" style={{ fontSize: '11px' }}>
                 {todayCredits.length} credit records
@@ -999,13 +949,16 @@ const CashierDashboard = () => {
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
-            <Card size="small">
+            <Card 
+              size="small"
+              style={{ borderLeft: `4px solid ${COLOR_SCHEME.primary}` }}
+            >
               <Statistic
                 title="Cash Sales"
                 value={cashSales}
                 precision={2}
                 prefix="KES"
-                valueStyle={{ color: '#52c41a', fontSize: '16px' }}
+                valueStyle={{ color: COLOR_SCHEME.primary, fontSize: '16px' }}
               />
               <Text type="secondary" style={{ fontSize: '11px' }}>
                 Cash & Bank/Mpesa
@@ -1013,25 +966,32 @@ const CashierDashboard = () => {
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
-            <Card size="small">
+            <Card 
+              size="small"
+              style={{ borderLeft: `4px solid ${COLOR_SCHEME.info}` }}
+            >
               <Statistic
-                title="Total Transactions"
+                title="Transactions"
                 value={allTransactions.length}
-                valueStyle={{ color: '#1890ff', fontSize: '18px' }}
+                valueStyle={{ color: COLOR_SCHEME.info, fontSize: '18px' }}
               />
               <Text type="secondary" style={{ fontSize: '11px' }}>
-                All completed sales
+                Today's count
               </Text>
             </Card>
           </Col>
         </Row>
 
-        <Tabs defaultActiveKey="transactions">
+        <Tabs 
+          defaultActiveKey="transactions"
+          type="card"
+        >
           <Tabs.TabPane 
             tab={
               <span>
                 <TransactionOutlined />
-                All Transactions ({allTransactions.length})
+                All Transactions 
+                <Badge count={allTransactions.length} style={{ marginLeft: 8 }} />
               </span>
             } 
             key="transactions"
@@ -1053,7 +1013,8 @@ const CashierDashboard = () => {
             tab={
               <span>
                 <CreditCardOutlined />
-                Credit Transactions ({todayCredits.length})
+                Credit Transactions 
+                <Badge count={todayCredits.length} style={{ marginLeft: 8, backgroundColor: COLOR_SCHEME.warning }} />
               </span>
             } 
             key="credits"
@@ -1074,18 +1035,18 @@ const CashierDashboard = () => {
 
                   return (
                     <Table.Summary>
-                      <Table.Summary.Row>
+                      <Table.Summary.Row style={{ background: '#fafafa' }}>
                         <Table.Summary.Cell index={0} colSpan={2}>
                           <Text strong>Totals:</Text>
                         </Table.Summary.Cell>
                         <Table.Summary.Cell index={2}>
-                          <Text strong>{formatCurrency(totalCreditAmount)}</Text>
+                          <Text strong>{CashierCalculationUtils.formatCurrency(totalCreditAmount)}</Text>
                         </Table.Summary.Cell>
                         <Table.Summary.Cell index={3}>
-                          <Text strong type="success">{formatCurrency(totalPaid)}</Text>
+                          <Text strong type="success">{CashierCalculationUtils.formatCurrency(totalPaid)}</Text>
                         </Table.Summary.Cell>
                         <Table.Summary.Cell index={4}>
-                          <Text strong type="danger">{formatCurrency(totalBalance)}</Text>
+                          <Text strong type="danger">{CashierCalculationUtils.formatCurrency(totalBalance)}</Text>
                         </Table.Summary.Cell>
                         <Table.Summary.Cell index={5}></Table.Summary.Cell>
                       </Table.Summary.Row>
@@ -1100,13 +1061,13 @@ const CashierDashboard = () => {
     );
   };
 
-  // Product Row Component
+  // Enhanced Product Row Component with consistent styling
   const ProductRow = React.memo(({ product, onAddToCart, disabled }) => {
     const stockStatus = useMemo(() => {
       const stock = product.currentStock || 0;
-      if (stock <= 0) return { status: 'out', color: 'red', text: 'Out of Stock' };
-      if (stock <= (product.minStockLevel || 5)) return { status: 'low', color: 'orange', text: 'Low Stock' };
-      return { status: 'in', color: 'green', text: 'In Stock' };
+      if (stock <= 0) return { status: 'out', color: COLOR_SCHEME.error, text: 'Out of Stock' };
+      if (stock <= (product.minStockLevel || 5)) return { status: 'low', color: COLOR_SCHEME.warning, text: 'Low Stock' };
+      return { status: 'in', color: COLOR_SCHEME.success, text: 'In Stock' };
     }, [product.currentStock, product.minStockLevel]);
 
     const handleAddToCart = () => {
@@ -1145,14 +1106,14 @@ const CashierDashboard = () => {
           <div style={{
             width: '40px',
             height: '40px',
-            backgroundColor: '#f0f2f5',
+            backgroundColor: COLOR_SCHEME.background.light,
             borderRadius: '6px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0
           }}>
-            <ShoppingCartOutlined style={{ fontSize: '18px', color: '#1890ff' }} />
+            <ShoppingCartOutlined style={{ fontSize: '18px', color: COLOR_SCHEME.primary }} />
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1173,7 +1134,7 @@ const CashierDashboard = () => {
               <Text 
                 strong 
                 style={{ 
-                  color: '#1890ff', 
+                  color: COLOR_SCHEME.primary, 
                   fontSize: '14px'
                 }}
               >
@@ -1186,7 +1147,8 @@ const CashierDashboard = () => {
                   margin: 0, 
                   fontSize: '11px',
                   padding: '1px 6px',
-                  lineHeight: '1.2'
+                  lineHeight: '1.2',
+                  fontWeight: 'bold'
                 }}
               >
                 Stock: {product.currentStock || 0}
@@ -1219,7 +1181,9 @@ const CashierDashboard = () => {
             style={{
               fontSize: '12px',
               height: '32px',
-              minWidth: '100px'
+              minWidth: '100px',
+              backgroundColor: stockStatus.status === 'out' ? '#d9d9d9' : COLOR_SCHEME.primary,
+              borderColor: stockStatus.status === 'out' ? '#d9d9d9' : COLOR_SCHEME.primary
             }}
           >
             Add to Cart
@@ -1229,9 +1193,9 @@ const CashierDashboard = () => {
     );
   });
 
-  // Payment Method Modal
+  // Enhanced Payment Method Modal
   const renderPaymentModal = () => {
-    const modalTitle = `Select Payment Method - ${formatCurrency(totals.subtotal)}`;
+    const modalTitle = `Select Payment Method - ${CashierCalculationUtils.formatCurrency(totals.subtotal)}`;
 
     return (
       <Modal
@@ -1256,6 +1220,7 @@ const CashierDashboard = () => {
             type="primary" 
             loading={posLoading.checkout}
             onClick={processPayment}
+            style={{ backgroundColor: COLOR_SCHEME.primary }}
           >
             Process Payment
           </Button>,
@@ -1269,9 +1234,9 @@ const CashierDashboard = () => {
                 <Card 
                   hoverable 
                   onClick={() => handlePaymentMethodSelect('cash')}
-                  style={{ textAlign: 'center' }}
+                  style={{ textAlign: 'center', borderColor: COLOR_SCHEME.success }}
                 >
-                  <DollarOutlined style={{ fontSize: '32px', color: '#52c41a' }} />
+                  <DollarOutlined style={{ fontSize: '32px', color: COLOR_SCHEME.success }} />
                   <div style={{ marginTop: '8px' }}>
                     <Text strong>Cash</Text>
                   </div>
@@ -1281,9 +1246,9 @@ const CashierDashboard = () => {
                 <Card 
                   hoverable 
                   onClick={() => handlePaymentMethodSelect('bank_mpesa')}
-                  style={{ textAlign: 'center' }}
+                  style={{ textAlign: 'center', borderColor: COLOR_SCHEME.primary }}
                 >
-                  <BankOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
+                  <BankOutlined style={{ fontSize: '32px', color: COLOR_SCHEME.primary }} />
                   <div style={{ marginTop: '8px' }}>
                     <Text strong>Bank/Mpesa</Text>
                   </div>
@@ -1293,12 +1258,12 @@ const CashierDashboard = () => {
                 <Card 
                   hoverable 
                   onClick={() => handlePaymentMethodSelect('cash_bank_mpesa')}
-                  style={{ textAlign: 'center', borderColor: '#722ed1' }}
+                  style={{ textAlign: 'center', borderColor: COLOR_SCHEME.purple }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                    <DollarOutlined style={{ fontSize: '24px', color: '#52c41a' }} />
+                    <DollarOutlined style={{ fontSize: '24px', color: COLOR_SCHEME.success }} />
                     <Text strong>/</Text>
-                    <BankOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+                    <BankOutlined style={{ fontSize: '24px', color: COLOR_SCHEME.primary }} />
                   </div>
                   <div style={{ marginTop: '8px' }}>
                     <Text strong>Cash + Bank/Mpesa</Text>
@@ -1309,9 +1274,9 @@ const CashierDashboard = () => {
                 <Card 
                   hoverable 
                   onClick={() => handlePaymentMethodSelect('credit')}
-                  style={{ textAlign: 'center', borderColor: '#f5222d' }}
+                  style={{ textAlign: 'center', borderColor: COLOR_SCHEME.warning }}
                 >
-                  <CreditCardOutlined style={{ fontSize: '32px', color: '#f5222d' }} />
+                  <CreditCardOutlined style={{ fontSize: '32px', color: COLOR_SCHEME.warning }} />
                   <div style={{ marginTop: '8px' }}>
                     <Text strong>Credit</Text>
                   </div>
@@ -1319,269 +1284,473 @@ const CashierDashboard = () => {
               </Col>
             </Row>
           </div>
-        ) : selectedPaymentMethod === 'cash_bank_mpesa' ? (
-          <Form
-            form={paymentForm}
-            layout="vertical"
-            onValuesChange={handleCashBankMpesaChange}
-          >
-            <Alert
-              message="Cash + Bank/Mpesa Payment"
-              description={`Please enter the amounts for cash and Bank/Mpesa. The total must equal ${formatCurrency(totals.subtotal)}`}
-              type="info"
-              showIcon
-              style={{ marginBottom: '16px' }}
-            />
-            
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item
-                  label="Cash Amount (KES)"
-                  name="cashAmount"
-                  rules={[
-                    { required: true, message: 'Please enter cash amount' },
-                    { 
-                      type: 'number', 
-                      min: 0, 
-                      message: 'Cash amount cannot be negative' 
-                    }
-                  ]}
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="0.00"
-                    min={0}
-                    max={totals.subtotal}
-                    step={0.01}
-                    precision={2}
-                    formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                    parser={value => value.replace(/KES\s?|(,*)/g, '')}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  label="Bank/Mpesa Amount (KES)"
-                  name="bankMpesaAmount"
-                  rules={[
-                    { required: true, message: 'Please enter Bank/Mpesa amount' },
-                    { 
-                      type: 'number', 
-                      min: 0, 
-                      message: 'Bank/Mpesa amount cannot be negative' 
-                    }
-                  ]}
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="0.00"
-                    min={0}
-                    max={totals.subtotal}
-                    step={0.01}
-                    precision={2}
-                    formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                    parser={value => value.replace(/KES\s?|(,*)/g, '')}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            
-            <Descriptions size="small" bordered column={1}>
-              <Descriptions.Item label="Cash Amount">
-                {formatCurrency(cashBankMpesaSplit.cashAmount)}
-              </Descriptions.Item>
-              <Descriptions.Item label="Bank/Mpesa Amount">
-                {formatCurrency(cashBankMpesaSplit.bankMpesaAmount)}
-              </Descriptions.Item>
-              <Descriptions.Item label="Total Entered">
-                <Text strong>{formatCurrency(cashBankMpesaSplit.totalAmount)}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Required Total">
-                <Text strong>{formatCurrency(totals.subtotal)}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Difference">
-                <Text 
-                  strong 
-                  type={Math.abs(cashBankMpesaSplit.totalAmount - totals.subtotal) < 0.01 ? 'success' : 'danger'}
-                >
-                  {formatCurrency(cashBankMpesaSplit.totalAmount - totals.subtotal)}
-                </Text>
-              </Descriptions.Item>
-            </Descriptions>
-          </Form>
-        ) : selectedPaymentMethod === 'credit' ? (
-          <Form
-            form={creditForm}
-            layout="vertical"
-            onValuesChange={handleCreditPaymentChange}
-            initialValues={{
-              amountPaid: 0,
-              balance: totals.subtotal,
-              dueDate: dayjs().add(7, 'day'),
-              shopName: selectedShop?.name || '',
-              shopId: selectedShop?._id || ''
-            }}
-          >
-            <Alert
-              message="Credit Sale - Shop Classification Required"
-              description="Please enter customer details and shop information for credit classification"
-              type="warning"
-              showIcon
-              style={{ marginBottom: '16px' }}
-            />
-            
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item
-                  label="Customer Name"
-                  name="customerName"
-                  rules={[{ required: true, message: 'Customer name is required' }]}
-                >
-                  <Input 
-                    prefix={<UserOutlined />} 
-                    placeholder="Enter customer name" 
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  label="Phone Number"
-                  name="customerPhone"
-                  rules={[
-                    { required: true, message: 'Phone number is required' },
-                    { pattern: /^[0-9+\-\s()]{10,}$/, message: 'Please enter a valid phone number' }
-                  ]}
-                >
-                  <Input 
-                    prefix={<PhoneOutlined />} 
-                    placeholder="e.g., 0712345678" 
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item
-                  label="Shop Name"
-                  name="shopName"
-                  rules={[{ required: true, message: 'Shop name is required for credit classification' }]}
-                >
-                  <Input 
-                    prefix={<ShopOutlined />} 
-                    placeholder="Enter shop name" 
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  label="Shop ID"
-                  name="shopId"
-                  rules={[{ required: true, message: 'Shop ID is required for credit classification' }]}
-                >
-                  <Input 
-                    prefix={<ShopOutlined />} 
-                    placeholder="Enter shop ID" 
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            
-            <Form.Item
-              label="Due Date"
-              name="dueDate"
-              rules={[{ required: true, message: 'Due date is required' }]}
-            >
-              <DatePicker
-                style={{ width: '100%' }}
-                disabledDate={(current) => current && current < dayjs().endOf('day')}
-                suffixIcon={<CalendarOutlined />}
-              />
-            </Form.Item>
-            
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item
-                  label="Amount Paid Now (KES)"
-                  name="amountPaid"
-                  rules={[
-                    { required: true, message: 'Please enter amount paid' },
-                    { 
-                      type: 'number', 
-                      min: 0, 
-                      message: 'Amount cannot be negative' 
-                    }
-                  ]}
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="0.00"
-                    min={0}
-                    max={totals.subtotal}
-                    step={0.01}
-                    precision={2}
-                    formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                    parser={value => value.replace(/KES\s?|(,*)/g, '')}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  label="Balance Due (KES)"
-                  name="balance"
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    value={creditPaymentData.balance}
-                    disabled
-                    precision={2}
-                    formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            
-            <Descriptions size="small" bordered column={1}>
-              <Descriptions.Item label="Total Amount">
-                <Text strong>{formatCurrency(totals.subtotal)}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Amount Paid">
-                <Text strong type="success">
-                  {formatCurrency(creditPaymentData.amountPaid)}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Balance Due">
-                <Text strong type="danger">
-                  {formatCurrency(creditPaymentData.balance)}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Due Date">
-                <Text strong>
-                  {creditForm.getFieldValue('dueDate')?.format('DD/MM/YYYY') || 'Not set'}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Shop Classification">
-                <Text strong>
-                  {creditForm.getFieldValue('shopName') || 'Not set'}
-                </Text>
-              </Descriptions.Item>
-            </Descriptions>
-          </Form>
         ) : (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <Alert
-              message={`Confirm ${selectedPaymentMethod === 'bank_mpesa' ? 'BANK/MPESA' : selectedPaymentMethod?.toUpperCase()} Payment`}
-              description={`Total Amount: ${formatCurrency(totals.subtotal)}`}
-              type="info"
-              showIcon
-            />
-            <div style={{ marginTop: '16px' }}>
-              <Text>Click "Process Payment" to complete the transaction.</Text>
-            </div>
+          <div style={{ padding: '10px 0' }}>
+            {selectedPaymentMethod === 'cash_bank_mpesa' && (
+              <Form
+                form={paymentForm}
+                layout="vertical"
+                onValuesChange={handleCashBankMpesaChange}
+              >
+                <Alert
+                  message="Cash + Bank/Mpesa Payment"
+                  description={`Please enter the amounts for cash and Bank/Mpesa. The total must equal ${CashierCalculationUtils.formatCurrency(totals.subtotal)}`}
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+                
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Cash Amount (KES)"
+                      name="cashAmount"
+                      rules={[
+                        { required: true, message: 'Please enter cash amount' },
+                        { 
+                          type: 'number', 
+                          min: 0, 
+                          message: 'Cash amount cannot be negative' 
+                        }
+                      ]}
+                    >
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        placeholder="0.00"
+                        min={0}
+                        max={totals.subtotal}
+                        step={0.01}
+                        precision={2}
+                        formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        parser={value => value.replace(/KES\s?|(,*)/g, '')}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Bank/Mpesa Amount (KES)"
+                      name="bankMpesaAmount"
+                      rules={[
+                        { required: true, message: 'Please enter Bank/Mpesa amount' },
+                        { 
+                          type: 'number', 
+                          min: 0, 
+                          message: 'Bank/Mpesa amount cannot be negative' 
+                        }
+                      ]}
+                    >
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        placeholder="0.00"
+                        min={0}
+                        max={totals.subtotal}
+                        step={0.01}
+                        precision={2}
+                        formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        parser={value => value.replace(/KES\s?|(,*)/g, '')}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                
+                <Descriptions size="small" bordered column={1}>
+                  <Descriptions.Item label="Cash Amount">
+                    {CashierCalculationUtils.formatCurrency(cashBankMpesaSplit.cashAmount)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Bank/Mpesa Amount">
+                    {CashierCalculationUtils.formatCurrency(cashBankMpesaSplit.bankMpesaAmount)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Total Entered">
+                    <Text strong>{CashierCalculationUtils.formatCurrency(cashBankMpesaSplit.totalAmount)}</Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Required Total">
+                    <Text strong>{CashierCalculationUtils.formatCurrency(totals.subtotal)}</Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Difference">
+                    <Text 
+                      strong 
+                      type={Math.abs(cashBankMpesaSplit.totalAmount - totals.subtotal) < 0.01 ? 'success' : 'danger'}
+                    >
+                      {CashierCalculationUtils.formatCurrency(cashBankMpesaSplit.totalAmount - totals.subtotal)}
+                    </Text>
+                  </Descriptions.Item>
+                </Descriptions>
+              </Form>
+            )}
+            
+            {selectedPaymentMethod === 'credit' && (
+              <Form
+                form={creditForm}
+                layout="vertical"
+                onValuesChange={handleCreditPaymentChange}
+                initialValues={{
+                  amountPaid: 0,
+                  balance: totals.subtotal,
+                  dueDate: dayjs().add(7, 'day'),
+                  shopName: selectedShop?.name || '',
+                  shopId: selectedShop?._id || ''
+                }}
+              >
+                <Alert
+                  message="Credit Sale - Shop Classification Required"
+                  description="Please enter customer details and shop information for credit classification"
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+                
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Customer Name"
+                      name="customerName"
+                      rules={[{ required: true, message: 'Customer name is required' }]}
+                    >
+                      <Input 
+                        prefix={<UserOutlined />} 
+                        placeholder="Enter customer name" 
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Phone Number"
+                      name="customerPhone"
+                      rules={[
+                        { required: true, message: 'Phone number is required' },
+                        { pattern: /^[0-9+\-\s()]{10,}$/, message: 'Please enter a valid phone number' }
+                      ]}
+                    >
+                      <Input 
+                        prefix={<PhoneOutlined />} 
+                        placeholder="e.g., 0712345678" 
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Shop Name"
+                      name="shopName"
+                      rules={[{ required: true, message: 'Shop name is required for credit classification' }]}
+                    >
+                      <Input 
+                        prefix={<ShopOutlined />} 
+                        placeholder="Enter shop name" 
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Shop ID"
+                      name="shopId"
+                      rules={[{ required: true, message: 'Shop ID is required for credit classification' }]}
+                    >
+                      <Input 
+                        prefix={<ShopOutlined />} 
+                        placeholder="Enter shop ID" 
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                
+                <Form.Item
+                  label="Due Date"
+                  name="dueDate"
+                  rules={[{ required: true, message: 'Due date is required' }]}
+                >
+                  <DatePicker
+                    style={{ width: '100%' }}
+                    disabledDate={(current) => current && current < dayjs().endOf('day')}
+                    suffixIcon={<CalendarOutlined />}
+                  />
+                </Form.Item>
+                
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Amount Paid Now (KES)"
+                      name="amountPaid"
+                      rules={[
+                        { required: true, message: 'Please enter amount paid' },
+                        { 
+                          type: 'number', 
+                          min: 0, 
+                          message: 'Amount cannot be negative' 
+                        }
+                      ]}
+                    >
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        placeholder="0.00"
+                        min={0}
+                        max={totals.subtotal}
+                        step={0.01}
+                        precision={2}
+                        formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        parser={value => value.replace(/KES\s?|(,*)/g, '')}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      label="Balance Due (KES)"
+                      name="balance"
+                    >
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        value={creditPaymentData.balance}
+                        disabled
+                        precision={2}
+                        formatter={value => `KES ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                
+                <Descriptions size="small" bordered column={1}>
+                  <Descriptions.Item label="Total Amount">
+                    <Text strong>{CashierCalculationUtils.formatCurrency(totals.subtotal)}</Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Amount Paid">
+                    <Text strong type="success">
+                      {CashierCalculationUtils.formatCurrency(creditPaymentData.amountPaid)}
+                    </Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Balance Due">
+                    <Text strong type="danger">
+                      {CashierCalculationUtils.formatCurrency(creditPaymentData.balance)}
+                    </Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Due Date">
+                    <Text strong>
+                      {creditForm.getFieldValue('dueDate')?.format('DD/MM/YYYY') || 'Not set'}
+                    </Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Shop Classification">
+                    <Text strong>
+                      {creditForm.getFieldValue('shopName') || 'Not set'}
+                    </Text>
+                  </Descriptions.Item>
+                </Descriptions>
+              </Form>
+            )}
+            
+            {(selectedPaymentMethod === 'cash' || selectedPaymentMethod === 'bank_mpesa') && (
+              <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                <Alert
+                  message={`Confirm ${selectedPaymentMethod === 'bank_mpesa' ? 'BANK/MPESA' : selectedPaymentMethod?.toUpperCase()} Payment`}
+                  description={`Total Amount: ${CashierCalculationUtils.formatCurrency(totals.subtotal)}`}
+                  type="info"
+                  showIcon
+                />
+                <div style={{ marginTop: '16px' }}>
+                  <Text>Click "Process Payment" to complete the transaction.</Text>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>
     );
+  };
+
+  // Validation functions
+  const validateCashBankMpesaPayment = () => {
+    const { cashAmount, bankMpesaAmount, totalAmount } = cashBankMpesaSplit;
+    
+    if (totalAmount.toFixed(2) !== totals.subtotal.toFixed(2)) {
+      message.error(`The sum of Cash and Bank/Mpesa (KES ${totalAmount.toLocaleString()}) must equal the total amount (KES ${totals.subtotal.toLocaleString()})`);
+      return false;
+    }
+    
+    if (cashAmount < 0 || bankMpesaAmount < 0) {
+      message.error('Cash and Bank/Mpesa amounts cannot be negative');
+      return false;
+    }
+    
+    return true;
+  };
+
+  const validateCreditPayment = async () => {
+    try {
+      const values = await creditForm.validateFields();
+      
+      if (values.amountPaid < 0) {
+        message.error('Amount paid cannot be negative');
+        return false;
+      }
+      
+      if (values.amountPaid > totals.subtotal) {
+        message.error('Amount paid cannot exceed total amount');
+        return false;
+      }
+      
+      if (values.balance < 0) {
+        message.error('Balance cannot be negative');
+        return false;
+      }
+      
+      if (!values.shopName || !values.shopId) {
+        message.error('Shop information is required for credit transactions');
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      message.error('Please fill all required fields correctly');
+      return false;
+    }
+  };
+
+  // Process Payment
+  const processPayment = async () => {
+    if (selectedPaymentMethod === 'cash_bank_mpesa') {
+      if (!validateCashBankMpesaPayment()) return;
+      
+      await handleCheckout('cash_bank_mpesa', {
+        cashAmount: cashBankMpesaSplit.cashAmount,
+        bankMpesaAmount: cashBankMpesaSplit.bankMpesaAmount
+      });
+      
+    } else if (selectedPaymentMethod === 'credit') {
+      if (!await validateCreditPayment()) return;
+      
+      const values = creditForm.getFieldsValue();
+      
+      await handleCheckout('credit', {
+        amountPaid: values.amountPaid,
+        balance: values.balance,
+        customerName: values.customerName,
+        customerPhone: values.customerPhone,
+        dueDate: values.dueDate,
+        shopName: values.shopName,
+        shopId: values.shopId
+      });
+      
+    } else {
+      await handleCheckout(selectedPaymentMethod);
+    }
+    
+    setPaymentModalVisible(false);
+    setSelectedPaymentMethod(null);
+  };
+
+  // Cash/Bank-Mpesa split handler
+  const handleCashBankMpesaChange = (changedValues, allValues) => {
+    const cashAmount = parseFloat(allValues.cashAmount || 0);
+    const bankMpesaAmount = parseFloat(allValues.bankMpesaAmount || 0);
+    const total = cashAmount + bankMpesaAmount;
+    
+    setCashBankMpesaSplit({
+      cashAmount,
+      bankMpesaAmount,
+      totalAmount: total
+    });
+  };
+
+  // Credit payment change handler
+  const handleCreditPaymentChange = (changedValues, allValues) => {
+    const amountPaid = parseFloat(allValues.amountPaid || 0);
+    const totalAmount = totals.subtotal;
+    const balance = totalAmount - amountPaid;
+    
+    setCreditPaymentData(prev => ({
+      ...prev,
+      amountPaid,
+      balance: Math.max(0, balance),
+      shopName: allValues.shopName || prev.shopName,
+      shopId: allValues.shopId || prev.shopId
+    }));
+  };
+
+  // Fallback function for basic stats calculation
+  const fetchDailySalesFallback = async () => {
+    try {
+      const today = dayjs().startOf('day').toISOString();
+      const now = dayjs().toISOString();
+      
+      const response = await unifiedAPI.getCombinedTransactions({
+        cashierId: cashier._id,
+        shopId: selectedShop._id,
+        startDate: today,
+        endDate: now,
+        status: 'completed'
+      });
+      
+      const transactions = response.transactions || [];
+      
+      // Calculate basic stats
+      const totalSales = transactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+      const totalTransactions = transactions.length;
+      const creditAmount = transactions
+        .filter(t => t.paymentMethod === 'credit')
+        .reduce((sum, t) => sum + (t.totalAmount || 0), 0);
+      const creditTransactions = transactions.filter(t => t.paymentMethod === 'credit').length;
+
+      setDailyStats({
+        totalSales,
+        totalTransactions,
+        creditAmount,
+        creditTransactions,
+        cashAmount: totalSales - creditAmount,
+        bankMpesaAmount: 0,
+        cashierItemsSold: transactions.reduce((sum, t) => 
+          sum + (t.items?.reduce((itemSum, item) => itemSum + (item.quantity || 0), 0) || 0), 0
+        )
+      });
+      
+    } catch (fallbackError) {
+      console.error('❌ Fallback calculation failed:', fallbackError);
+      setDailyStats(getDefaultCashierStats());
+    }
+  };
+
+  const handlePrintReceipt = () => {
+    const receiptWindow = window.open('', '_blank');
+    if (receiptWindow) {
+      receiptWindow.document.write(`
+        <html>
+          <head>
+            <title>Receipt - ${currentTransaction?.receiptNumber}</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              @media print { body { margin: 0; } }
+            </style>
+          </head>
+          <body>
+            <div id="receipt-content"></div>
+            <script>
+              window.onload = function() {
+                window.print();
+                setTimeout(() => window.close(), 1000);
+              };
+            </script>
+          </body>
+        </html>
+      `);
+      
+      const receiptContent = document.getElementById('receipt-print-content');
+      if (receiptContent) {
+        receiptWindow.document.getElementById('receipt-content').innerHTML = receiptContent.innerHTML;
+      }
+    }
+  };
+
+  const handleCloseReceipt = () => {
+    setShowReceipt(false);
+    setCurrentTransaction(null);
+  };
+
+  const handleLogout = () => {
+    authAPI.logout();
+    navigate('/cashier/login');
+  };
+
+  const handleBackToShops = () => {
+    navigate('/cashier/shops');
   };
 
   // Initial data fetch
@@ -1614,9 +1783,9 @@ const CashierDashboard = () => {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
+    <Layout style={{ minHeight: '100vh', background: COLOR_SCHEME.background.light }}>
       <Header style={{ 
-        background: '#fff', 
+        background: COLOR_SCHEME.background.header, 
         padding: '0 24px',
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
         borderBottom: '1px solid #f0f0f0'
@@ -1629,20 +1798,21 @@ const CashierDashboard = () => {
                 onClick={handleBackToShops}
                 type="text"
                 size="small"
+                style={{ color: 'white' }}
               >
                 Change Shop
               </Button>
-              <Title level={4} style={{ margin: 0 }}>
+              <Title level={4} style={{ margin: 0, color: 'white' }}>
                 <ShopOutlined /> {selectedShop?.name || 'Cashier Portal'}
               </Title>
-              <Tag color="blue">
+              <Tag color={COLOR_SCHEME.primary}>
                 <UserOutlined /> {cashier?.name || 'Cashier'}
               </Tag>
             </Space>
           </Col>
           <Col>
             <Space>
-              <Text strong type="secondary">
+              <Text strong style={{ color: 'rgba(255,255,255,0.8)' }}>
                 Today: {dayjs().format('DD/MM/YYYY')}
               </Text>
               <Button 
@@ -1654,6 +1824,7 @@ const CashierDashboard = () => {
                 }}
                 loading={posLoading.stats}
                 size="small"
+                style={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
               >
                 Refresh
               </Button>
@@ -1673,73 +1844,131 @@ const CashierDashboard = () => {
       <Content style={{ padding: '24px' }}>
         {/* Enhanced Performance Header */}
         <Card 
-          style={{ marginBottom: '16px' }}
+          style={{ marginBottom: '16px', borderRadius: '8px' }}
           loading={posLoading.stats}
         >
           <Row gutter={[16, 16]}>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Total Sales (Including Credit)"
-                value={dailyStats.totalSales}
-                precision={2}
-                prefix="KES"
-                valueStyle={{ color: '#3f8600', fontSize: '16px' }}
-                suffix={
-                  <Tooltip title="Includes all sales: Cash, Bank/Mpesa, and Credit">
-                    <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: '14px' }} />
-                  </Tooltip>
-                }
-              />
+            <Col xs={24} sm={12} md={6}>
+              <Card 
+                size="small"
+                style={{ borderLeft: `4px solid ${COLOR_SCHEME.success}` }}
+              >
+                <Statistic
+                  title="Total Sales"
+                  value={dailyStats.totalSales}
+                  precision={2}
+                  prefix="KES"
+                  valueStyle={{ color: COLOR_SCHEME.success, fontSize: '16px' }}
+                  suffix={
+                    <Tooltip title="Includes all sales: Cash, Bank/Mpesa, and Credit">
+                      <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: '14px' }} />
+                    </Tooltip>
+                  }
+                />
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Credit Sales"
-                value={dailyStats.creditAmount}
-                precision={2}
-                prefix="KES"
-                valueStyle={{ 
-                  color: dailyStats.creditAmount > 0 ? '#fa8c16' : '#8c8c8c',
-                  fontSize: '16px',
-                  fontWeight: 'bold'
-                }}
-              />
-              <div style={{ marginTop: '4px' }}>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  {dailyStats.creditTransactions || 0} credit transactions
-                </Text>
-              </div>
+            <Col xs={24} sm={12} md={6}>
+              <Card 
+                size="small"
+                style={{ borderLeft: `4px solid ${COLOR_SCHEME.warning}` }}
+              >
+                <Statistic
+                  title="Credit Sales"
+                  value={dailyStats.creditAmount}
+                  precision={2}
+                  prefix="KES"
+                  valueStyle={{ 
+                    color: dailyStats.creditAmount > 0 ? COLOR_SCHEME.warning : '#8c8c8c',
+                    fontSize: '16px',
+                    fontWeight: 'bold'
+                  }}
+                />
+                <div style={{ marginTop: '4px' }}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    {dailyStats.creditTransactions || 0} credit transactions
+                  </Text>
+                </div>
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Cash Sales"
-                value={dailyStats.cashAmount}
-                precision={2}
-                prefix="KES"
-                valueStyle={{ color: '#cf1322', fontSize: '16px' }}
-              />
+            <Col xs={24} sm={12} md={6}>
+              <Card 
+                size="small"
+                style={{ borderLeft: `4px solid ${COLOR_SCHEME.primary}` }}
+              >
+                <Statistic
+                  title="Cash Sales"
+                  value={dailyStats.cashAmount}
+                  precision={2}
+                  prefix="KES"
+                  valueStyle={{ color: COLOR_SCHEME.primary, fontSize: '16px' }}
+                />
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Bank/Mpesa Sales"
-                value={dailyStats.bankMpesaAmount}
-                precision={2}
-                prefix="KES"
-                valueStyle={{ color: '#722ed1', fontSize: '16px' }}
-              />
+            <Col xs={24} sm={12} md={6}>
+              <Card 
+                size="small"
+                style={{ borderLeft: `4px solid ${COLOR_SCHEME.purple}` }}
+              >
+                <Statistic
+                  title="Bank/Mpesa Sales"
+                  value={dailyStats.bankMpesaAmount}
+                  precision={2}
+                  prefix="KES"
+                  valueStyle={{ color: COLOR_SCHEME.purple, fontSize: '16px' }}
+                />
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Total Transactions"
-                value={dailyStats.totalTransactions}
-                valueStyle={{ color: '#1890ff', fontSize: '18px' }}
-              />
+          </Row>
+
+          {/* Additional Stats Row */}
+          <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
+            <Col xs={24} sm={12} md={6}>
+              <Card size="small">
+                <Statistic
+                  title="Total Transactions"
+                  value={dailyStats.totalTransactions}
+                  valueStyle={{ color: COLOR_SCHEME.info, fontSize: '18px' }}
+                />
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={4}>
-              <Statistic
-                title="Items Sold"
-                value={dailyStats.cashierItemsSold}
-                valueStyle={{ color: '#52c41a', fontSize: '18px' }}
-              />
+            <Col xs={24} sm={12} md={6}>
+              <Card size="small">
+                <Statistic
+                  title="Items Sold"
+                  value={dailyStats.cashierItemsSold}
+                  valueStyle={{ color: COLOR_SCHEME.cyan, fontSize: '18px' }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card size="small">
+                <Statistic
+                  title="Profit Margin"
+                  value={dailyStats.profitMargin}
+                  precision={1}
+                  suffix="%"
+                  valueStyle={{ 
+                    color: dailyStats.profitMargin > 20 ? COLOR_SCHEME.success : 
+                           dailyStats.profitMargin > 10 ? COLOR_SCHEME.warning : COLOR_SCHEME.error,
+                    fontSize: '16px'
+                  }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card size="small">
+                <Statistic
+                  title="Collection Rate"
+                  value={dailyStats.collectionRate}
+                  precision={1}
+                  suffix="%"
+                  valueStyle={{ 
+                    color: dailyStats.collectionRate > 80 ? COLOR_SCHEME.success : 
+                           dailyStats.collectionRate > 50 ? COLOR_SCHEME.warning : COLOR_SCHEME.error,
+                    fontSize: '16px'
+                  }}
+                />
+              </Card>
             </Col>
           </Row>
 
@@ -1749,10 +1978,10 @@ const CashierDashboard = () => {
               <Col span={24}>
                 <Text strong>Sales Breakdown: </Text>
                 <Text>
-                  Total Sales ({formatCurrency(dailyStats.totalSales)}) = 
-                  Cash ({formatCurrency(dailyStats.cashAmount)}) + 
-                  Bank/Mpesa ({formatCurrency(dailyStats.bankMpesaAmount)}) + 
-                  Credit ({formatCurrency(dailyStats.creditAmount)})
+                  Total Sales ({CashierCalculationUtils.formatCurrency(dailyStats.totalSales)}) = 
+                  <Tag color={COLOR_SCHEME.primary} style={{ margin: '0 4px' }}>Cash: {CashierCalculationUtils.formatCurrency(dailyStats.cashAmount)}</Tag> + 
+                  <Tag color={COLOR_SCHEME.purple} style={{ margin: '0 4px' }}>Bank/Mpesa: {CashierCalculationUtils.formatCurrency(dailyStats.bankMpesaAmount)}</Tag> + 
+                  <Tag color={COLOR_SCHEME.warning} style={{ margin: '0 4px' }}>Credit: {CashierCalculationUtils.formatCurrency(dailyStats.creditAmount)}</Tag>
                 </Text>
               </Col>
             </Row>
@@ -1761,16 +1990,16 @@ const CashierDashboard = () => {
 
         {/* Credit Sales Percentage Indicator */}
         {dailyStats.totalSales > 0 && (
-          <Card size="small" style={{ marginBottom: '24px' }}>
+          <Card size="small" style={{ marginBottom: '24px', borderRadius: '8px' }}>
             <Row gutter={16} align="middle">
               <Col xs={24} sm={8}>
                 <Space>
-                  <CreditCardOutlined style={{ color: '#fa8c16' }} />
+                  <CreditCardOutlined style={{ color: COLOR_SCHEME.warning }} />
                   <Text strong>Credit Sales Percentage:</Text>
                   <Text 
                     strong 
                     style={{ 
-                      color: creditPercentage > 30 ? '#cf1322' : '#389e0d',
+                      color: creditPercentage > 30 ? COLOR_SCHEME.error : COLOR_SCHEME.success,
                       fontSize: '16px'
                     }}
                   >
@@ -1782,8 +2011,8 @@ const CashierDashboard = () => {
                 <Progress 
                   percent={Math.round(creditPercentage)}
                   strokeColor={{
-                    '0%': '#ffa940',
-                    '100%': '#fa8c16',
+                    '0%': COLOR_SCHEME.warning,
+                    '100%': COLOR_SCHEME.error,
                   }}
                   format={percent => `${percent}% Credit Sales`}
                 />
@@ -1819,13 +2048,13 @@ const CashierDashboard = () => {
                       <Badge 
                         count={products.length} 
                         showZero 
-                        color="#1890ff" 
+                        color={COLOR_SCHEME.primary} 
                         style={{ marginLeft: 8 }} 
                       />
                       {lowStockProducts.length > 0 && (
                         <Badge 
                           count={`${lowStockProducts.length} Low Stock`} 
-                          color="orange" 
+                          color={COLOR_SCHEME.warning} 
                         />
                       )}
                     </Space>
@@ -1850,6 +2079,7 @@ const CashierDashboard = () => {
                     </Space>
                   }
                   loading={posLoading.products}
+                  style={{ borderRadius: '8px' }}
                 >
                   {filteredProducts.length === 0 ? (
                     <Empty
